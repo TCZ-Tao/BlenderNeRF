@@ -1,5 +1,20 @@
 import bpy
-from . import helper, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
+
+# Reload Scripts (F3) re-imports this file; without importlib.reload, Python
+# keeps cached submodules, so UI/operator edits never show up.
+if 'bpy' in locals():
+    import importlib
+    importlib.reload(helper)
+    importlib.reload(blender_nerf_operator)
+    importlib.reload(blender_nerf_ui)
+    importlib.reload(sof_ui)
+    importlib.reload(ttc_ui)
+    importlib.reload(cos_ui)
+    importlib.reload(sof_operator)
+    importlib.reload(ttc_operator)
+    importlib.reload(cos_operator)
+else:
+    from . import helper, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
 
 
 # blender info
@@ -31,7 +46,7 @@ PROPS = [
     ('splats_test_dummy', bpy.props.BoolProperty(name='Dummy Test Camera', description='Whether to export a dummy test transforms.json file or the full set of test camera poses', default=True) ),
     ('nerf', bpy.props.BoolProperty(name='NeRF', description='Whether to export the camera transforms.json files in the defaut NeRF file format convention', default=False) ),
     ('save_path', bpy.props.StringProperty(name='Save Path', description='Path to the output directory in which the synthetic dataset will be stored', subtype='DIR_PATH') ),
-    ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIP', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),
+    ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIPxxx', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),
 
     # global automatic properties
     ('init_frame_step', bpy.props.IntProperty(name='Initial Frame Step') ),
