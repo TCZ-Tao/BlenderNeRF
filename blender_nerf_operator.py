@@ -3,6 +3,7 @@ import math
 import json
 import datetime
 import bpy
+from . import helper
 
 
 # global addon script variables
@@ -90,9 +91,11 @@ class BlenderNeRF_Operator(bpy.types.Operator):
 
         initFrame = scene.frame_current
         step = scene.train_frame_steps if (mode == 'TRAIN' and method == 'SOF') else scene.frame_step
-        if (mode == 'TRAIN' and method == 'COS'):
+        if method == 'COS' and mode == 'TRAIN':
             end = scene.frame_start + scene.cos_nb_frames - 1
-        elif (mode == 'TRAIN' and method == 'TTC'):
+        elif method == 'COS' and mode == 'TEST':
+            end = scene.frame_start + scene.cos_nb_test_frames - 1
+        elif method == 'TTC' and mode == 'TRAIN':
             end = scene.frame_start + scene.ttc_nb_frames - 1
         else:
             end = scene.frame_end
@@ -262,9 +265,72 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             logdata['Radius'] = scene.sphere_radius
             logdata['Lens'] = str(scene.focal) + ' mm'
             logdata['Seed'] = scene.seed
-            logdata['Frames'] = scene.cos_nb_frames
+            logdata['Train Frames'] = scene.cos_nb_frames
+            logdata['Test Frames'] = scene.cos_nb_test_frames
             logdata['Upper Views'] = scene.upper_views
             logdata['Outwards'] = scene.outwards
             logdata['Dataset Name'] = scene.cos_dataset_name
 
         self.save_json(directory, filename='log.txt', data=logdata)
+
+
+class BlenderNeRF_RenderPipeline(bpy.types.Operator):
+    '''Modal train-then-test render pipeline.'''
+    bl_idname = 'object.blendernerf_render_pipeline'
+    bl_label = 'BlenderNeRF Render Pipeline'
+    bl_options = {'INTERNAL'}
+
+    do_train: bpy.props.BoolProperty(default=True)
+    do_test: bpy.props.BoolProperty(default=False)
+
+    def invoke(self, context, event):
+        return self.execute(context)
+
+    def execute(self, context):
+        self.phase = 'train' if self.do_train else 'test'
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.25, window=context.window)
+        wm.modal_handler_add(self)
+        self.start_phase(context)
+        return {'RUNNING_MODAL'}
+
+    def start_phase(self, context):
+        scene = context.scene
+        scene.nerf_job_status = helper.JOB_RUNNING
+        if self.phase == 'test':
+            helper.begin_test_render(scene)
+        else:
+            helper.invoke_animation_render()
+
+    def modal(self, context, event):
+        if event.type != 'TIMER':
+            return {'PASS_THROUGH'}
+
+        scene = context.scene
+        status = scene.nerf_job_status
+
+        if status == helper.JOB_RUNNING:
+            return {'PASS_THROUGH'}
+
+        if status == helper.JOB_CANCELLED:
+            helper.finalize_render(scene)
+            self.cleanup(context)
+            return {'FINISHED'}
+
+        if status == helper.JOB_DONE:
+            if self.phase == 'train' and self.do_test:
+                self.phase = 'test'
+                self.start_phase(context)
+                return {'RUNNING_MODAL'}
+
+            helper.finalize_render(scene)
+            self.cleanup(context)
+            return {'FINISHED'}
+
+        return {'PASS_THROUGH'}
+
+    def cleanup(self, context):
+        wm = context.window_manager
+        if getattr(self, '_timer', None) is not None:
+            wm.event_timer_remove(self._timer)
+            self._timer = None

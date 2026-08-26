@@ -183,39 +183,100 @@ def upd_on():
 
 ## blender handler functions
 
-# reset properties back to intial
+# nerf_job_status: 0 idle, 1 running, 2 done, 3 cancelled
+JOB_IDLE = 0
+JOB_RUNNING = 1
+JOB_DONE = 2
+JOB_CANCELLED = 3
+
+def wants_test_render(scene):
+    return scene.test_data and scene.render_frames and not (scene.splats and scene.splats_test_dummy)
+
+def dataset_output_path(scene):
+    dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)
+    method_dataset_name = dataset_names[list(scene.rendering).index(True)]
+    output_dir = bpy.path.clean_name(method_dataset_name)
+    return os.path.join(scene.save_path, output_dir)
+
+def invoke_animation_render():
+    '''Start an animation render with a VIEW_3D override when possible.'''
+    wm = bpy.context.window_manager
+    for window in wm.windows:
+        screen = window.screen
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type != 'VIEW_3D':
+                continue
+            region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+            override = {'window': window, 'screen': screen, 'area': area}
+            if region is not None:
+                override['region'] = region
+            with bpy.context.temp_override(**override):
+                bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
+            return
+    bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
+
+def begin_test_render(scene):
+    output_test = os.path.join(dataset_output_path(scene), 'test')
+    os.makedirs(output_test, exist_ok=True)
+
+    if scene.rendering[0]:  # SOF : restore default frame step, keep full timeline
+        scene.frame_step = scene.init_frame_step
+    elif scene.rendering[1]:  # TTC : switch to test camera over the scene timeline
+        scene.camera = scene.camera_test_target
+        scene.frame_end = scene.init_frame_end
+    elif scene.rendering[2]:  # COS : selected camera, Test Frames count
+        scene.camera = scene.init_active_camera
+        scene.frame_end = scene.frame_start + scene.cos_nb_test_frames - 1
+
+    scene.render.filepath = os.path.join(output_test, '')
+    invoke_animation_render()
+
+def finalize_render(scene):
+    if not any(scene.rendering):
+        scene.nerf_job_status = JOB_IDLE
+        return
+
+    dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)
+    method_dataset_name = dataset_names[list(scene.rendering).index(True)]
+
+    if scene.rendering[0]:
+        scene.frame_step = scene.init_frame_step
+
+    if scene.rendering[1]:
+        scene.frame_end = scene.init_frame_end
+
+    if scene.rendering[2]:
+        if not scene.init_camera_exists:
+            delete_camera(scene, CAMERA_NAME)
+        if not scene.init_sphere_exists:
+            objects = bpy.data.objects
+            objects.remove(objects[EMPTY_NAME], do_unlink=True)
+            scene.show_sphere = False
+            scene.sphere_exists = False
+
+        scene.camera = scene.init_active_camera
+        scene.frame_end = scene.init_frame_end
+
+    scene.rendering = (False, False, False)
+    scene.nerf_job_status = JOB_IDLE
+    scene.render.filepath = scene.init_output_path
+
+    output_dir = bpy.path.clean_name(method_dataset_name)
+    output_path = os.path.join(scene.save_path, output_dir)
+    shutil.make_archive(output_path, 'zip', output_path)
+    shutil.rmtree(output_path)
+
 @persistent
-def post_render(scene):
-    if any(scene.rendering): # execute this function only when rendering with addon
-        dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)
-        method_dataset_name = dataset_names[ list(scene.rendering).index(True) ]
+def post_render_complete(scene):
+    if any(scene.rendering):
+        scene.nerf_job_status = JOB_DONE
 
-        if scene.rendering[0]: scene.frame_step = scene.init_frame_step # sof : reset frame step
-
-        if scene.rendering[1]: # ttc : reset frame end
-            scene.frame_end = scene.init_frame_end
-
-        if scene.rendering[2]: # cos : reset camera settings
-            if not scene.init_camera_exists: delete_camera(scene, CAMERA_NAME)
-            if not scene.init_sphere_exists:
-                objects = bpy.data.objects
-                objects.remove(objects[EMPTY_NAME], do_unlink=True)
-                scene.show_sphere = False
-                scene.sphere_exists = False
-
-            scene.camera = scene.init_active_camera
-            scene.frame_end = scene.init_frame_end
-
-        scene.rendering = (False, False, False)
-        scene.render.filepath = scene.init_output_path # reset filepath
-
-        # clean directory name (unsupported characters replaced) and output path
-        output_dir = bpy.path.clean_name(method_dataset_name)
-        output_path = os.path.join(scene.save_path, output_dir)
-
-        # compress dataset and remove folder (only keep zip)
-        shutil.make_archive(output_path, 'zip', output_path) # output filename = output_path
-        shutil.rmtree(output_path)
+@persistent
+def post_render_cancel(scene):
+    if any(scene.rendering) and scene.nerf_job_status != JOB_DONE:
+        scene.nerf_job_status = JOB_CANCELLED
 
 # set initial property values (bpy.data and bpy.context require a loaded scene)
 @persistent

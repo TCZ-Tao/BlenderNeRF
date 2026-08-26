@@ -49,9 +49,12 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
         scene.init_active_camera = camera
 
         if scene.test_data:
-            # testing transforms
+            # testing transforms (selected camera, Test Frames)
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TEST', method='COS')
             self.save_json(output_path, 'transforms_test.json', output_data)
+
+        needs_train_render = scene.train_data and scene.render_frames
+        needs_test_render = helper.wants_test_render(scene)
 
         if scene.train_data:
             if not scene.show_camera: scene.show_camera = True
@@ -65,16 +68,19 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
             sphere_output_data['frames'] = self.get_camera_extrinsics(scene, sphere_camera, mode='TRAIN', method='COS')
             self.save_json(output_path, 'transforms_train.json', sphere_output_data)
 
-            # rendering
-            if scene.render_frames:
+            if needs_train_render:
                 output_train = os.path.join(output_path, 'train')
                 os.makedirs(output_train, exist_ok=True)
                 scene.rendering = (False, False, True)
                 scene.frame_end = scene.frame_start + scene.cos_nb_frames - 1 # update end frame
                 scene.render.filepath = os.path.join(output_train, '') # training frames path
-                bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True) # render scene
 
-        # if frames are rendered, the below code is executed by the handler function
+        if needs_train_render or needs_test_render:
+            if not any(scene.rendering):
+                scene.rendering = (False, False, True)
+            bpy.ops.object.blendernerf_render_pipeline('INVOKE_DEFAULT', do_train=needs_train_render, do_test=needs_test_render)
+            return {'FINISHED'}
+
         if not any(scene.rendering):
             # reset camera settings
             if not scene.init_camera_exists: helper.delete_camera(scene, CAMERA_NAME)

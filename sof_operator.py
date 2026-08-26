@@ -1,7 +1,7 @@
 import os
 import shutil
 import bpy
-from . import blender_nerf_operator
+from . import helper, blender_nerf_operator
 
 
 # subset of frames operator class
@@ -44,21 +44,27 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TEST', method='SOF')
             self.save_json(output_path, 'transforms_test.json', output_data)
 
+        needs_train_render = scene.train_data and scene.render_frames
+        needs_test_render = helper.wants_test_render(scene)
+
         if scene.train_data:
             # training transforms
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TRAIN', method='SOF')
             self.save_json(output_path, 'transforms_train.json', output_data)
 
-            # rendering
-            if scene.render_frames:
+            if needs_train_render:
                 output_train = os.path.join(output_path, 'train')
                 os.makedirs(output_train, exist_ok=True)
                 scene.rendering = (True, False, False)
                 scene.frame_step = scene.train_frame_steps # update frame step
                 scene.render.filepath = os.path.join(output_train, '') # training frames path
-                bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True) # render scene
 
-        # if frames are rendered, the below code is executed by the handler function
+        if needs_train_render or needs_test_render:
+            if not any(scene.rendering):
+                scene.rendering = (True, False, False)
+            bpy.ops.object.blendernerf_render_pipeline('INVOKE_DEFAULT', do_train=needs_train_render, do_test=needs_test_render)
+            return {'FINISHED'}
+
         if not any(scene.rendering):
             # compress dataset and remove folder (only keep zip)
             shutil.make_archive(output_path, 'zip', output_path) # output filename = output_path

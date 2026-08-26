@@ -1,5 +1,5 @@
 import bpy
-from . import helper, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
+from . import helper, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
 
 
 # blender info
@@ -23,9 +23,9 @@ VERSION = '.'.join(str(x) for x in bl_info['version'])
 PROPS = [
     # global controllable properties
     ('train_data', bpy.props.BoolProperty(name='Train', description='Construct the training data', default=True) ),
-    ('test_data', bpy.props.BoolProperty(name='Test', description='Construct the testing data', default=True) ),
+    ('test_data', bpy.props.BoolProperty(name='Test', description='Construct the testing data (camera poses and, if Render Frames is on, images)', default=True) ),
     ('aabb', bpy.props.IntProperty(name='AABB', description='AABB scale as defined in Instant NGP', default=4, soft_min=1, soft_max=128) ),
-    ('render_frames', bpy.props.BoolProperty(name='Render Frames', description='Whether training frames should be rendered. If not selected, only the transforms.json files will be generated', default=True) ),
+    ('render_frames', bpy.props.BoolProperty(name='Render Frames', description='Whether train/test frames should be rendered. If not selected, only the transforms.json files will be generated', default=True) ),
     ('logs', bpy.props.BoolProperty(name='Save Log File', description='Whether to create a log file containing information on the BlenderNeRF run', default=False) ),
     ('splats', bpy.props.BoolProperty(name='Gaussian Points', description='Whether to export a points3d.ply file for Gaussian Splatting', default=False) ),
     ('splats_test_dummy', bpy.props.BoolProperty(name='Dummy Test Camera', description='Whether to export a dummy test transforms.json file or the full set of test camera poses', default=True) ),
@@ -36,6 +36,7 @@ PROPS = [
     ('init_frame_step', bpy.props.IntProperty(name='Initial Frame Step') ),
     ('init_output_path', bpy.props.StringProperty(name='Initial Output Path', subtype='DIR_PATH') ),
     ('rendering', bpy.props.BoolVectorProperty(name='Rendering', description='Whether one of the SOF, TTC or COS methods is rendering', default=(False, False, False), size=3) ),
+    ('nerf_job_status', bpy.props.IntProperty(name='NeRF Job Status', description='0 idle, 1 running, 2 done, 3 cancelled', default=0) ),
     ('blendernerf_version', bpy.props.StringProperty(name='BlenderNeRF Version', default=VERSION) ),
 
     # sof properties
@@ -56,7 +57,8 @@ PROPS = [
     ('sphere_radius', bpy.props.FloatProperty(name='Radius', description='Radius scale of the training sphere', default=4.0, soft_min=0.01, unit='LENGTH', update=helper.properties_ui_upd) ),
     ('focal', bpy.props.FloatProperty(name='Lens', description='Focal length of the training camera', default=50, soft_min=1, soft_max=5000, unit='CAMERA', update=helper.properties_ui_upd) ),
     ('seed', bpy.props.IntProperty(name='Seed', description='Random seed for sampling views on the training sphere', default=0) ),
-    ('cos_nb_frames', bpy.props.IntProperty(name='Frames', description='Number of training frames randomly sampled from the training sphere', default=100, soft_min=1) ),
+    ('cos_nb_frames', bpy.props.IntProperty(name='Train Frames', description='Number of training frames randomly sampled from the training sphere', default=100, soft_min=1) ),
+    ('cos_nb_test_frames', bpy.props.IntProperty(name='Test Frames', description='Number of testing frames captured from the selected camera', default=100, soft_min=1) ),
     ('show_sphere', bpy.props.BoolProperty(name='Sphere', description='Whether to show the training sphere from which random views will be sampled', default=False, update=helper.visualize_sphere) ),
     ('show_camera', bpy.props.BoolProperty(name='Camera', description='Whether to show the training camera', default=False, update=helper.visualize_camera) ),
     ('upper_views', bpy.props.BoolProperty(name='Upper Views', description='Whether to sample views from the upper hemisphere of the training sphere only', default=False) ),
@@ -79,7 +81,8 @@ CLASSES = [
     cos_ui.COS_UI,
     sof_operator.SubsetOfFrames,
     ttc_operator.TrainTestCameras,
-    cos_operator.CameraOnSphere
+    cos_operator.CameraOnSphere,
+    blender_nerf_operator.BlenderNeRF_RenderPipeline
 ]
 
 # load addon
@@ -90,8 +93,8 @@ def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
 
-    bpy.app.handlers.render_complete.append(helper.post_render)
-    bpy.app.handlers.render_cancel.append(helper.post_render)
+    bpy.app.handlers.render_complete.append(helper.post_render_complete)
+    bpy.app.handlers.render_cancel.append(helper.post_render_cancel)
     bpy.app.handlers.frame_change_post.append(helper.cos_camera_update)
     bpy.app.handlers.depsgraph_update_post.append(helper.properties_desgraph_upd)
     bpy.app.handlers.depsgraph_update_post.append(helper.set_init_props)
@@ -101,8 +104,8 @@ def unregister():
     for (prop_name, _) in PROPS:
         delattr(bpy.types.Scene, prop_name)
 
-    bpy.app.handlers.render_complete.remove(helper.post_render)
-    bpy.app.handlers.render_cancel.remove(helper.post_render)
+    bpy.app.handlers.render_complete.remove(helper.post_render_complete)
+    bpy.app.handlers.render_cancel.remove(helper.post_render_cancel)
     bpy.app.handlers.frame_change_post.remove(helper.cos_camera_update)
     bpy.app.handlers.depsgraph_update_post.remove(helper.properties_desgraph_upd)
     # bpy.app.handlers.depsgraph_update_post.remove(helper.set_init_props)
