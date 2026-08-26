@@ -1,5 +1,4 @@
 import os
-import shutil
 import bpy
 from . import helper, blender_nerf_operator
 
@@ -92,8 +91,6 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
 
             scene.camera = scene.init_active_camera
 
-            # compress dataset and remove folder (only keep zip)
-            shutil.make_archive(output_path, 'zip', output_path) # output filename = output_path
-            shutil.rmtree(output_path)
+            helper.maybe_compress_dataset(scene, output_path)
 
         return {'FINISHED'}

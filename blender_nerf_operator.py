@@ -243,6 +243,7 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             'Render Frames': scene.render_frames,
             'File Format': 'NeRF' if scene.nerf else 'NGP',
             'Save Path': scene.save_path,
+            'Compress to ZIP': scene.compress_to_zip,
             'Method': method
         }
 

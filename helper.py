@@ -198,6 +198,13 @@ def dataset_output_path(scene):
     output_dir = bpy.path.clean_name(method_dataset_name)
     return os.path.join(scene.save_path, output_dir)
 
+def maybe_compress_dataset(scene, output_path):
+    '''Optionally zip the dataset folder and delete the uncompressed copy.'''
+    if not scene.compress_to_zip:
+        return
+    shutil.make_archive(output_path, 'zip', output_path)
+    shutil.rmtree(output_path)
+
 def invoke_animation_render():
     '''Start an animation render with a VIEW_3D override when possible.'''
     wm = bpy.context.window_manager
@@ -265,8 +272,7 @@ def finalize_render(scene):
 
     output_dir = bpy.path.clean_name(method_dataset_name)
     output_path = os.path.join(scene.save_path, output_dir)
-    shutil.make_archive(output_path, 'zip', output_path)
-    shutil.rmtree(output_path)
+    maybe_compress_dataset(scene, output_path)
 
 @persistent
 def post_render_complete(scene):

@@ -49,3 +49,4 @@ class BlenderNeRF_UI(bpy.types.Panel):
             layout.separator()
             layout.use_property_split = True
             layout.prop(scene, 'save_path')
+            layout.prop(scene, 'compress_to_zip')
