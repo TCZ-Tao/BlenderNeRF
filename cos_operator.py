@@ -84,6 +84,7 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
             # reset camera settings
             if not scene.init_camera_exists: helper.delete_camera(scene, CAMERA_NAME)
             if not scene.init_sphere_exists:
+                helper.delete_spiral_path()
                 objects = bpy.data.objects
                 objects.remove(objects[EMPTY_NAME], do_unlink=True)
                 scene.show_sphere = False
@@ -93,4 +94,47 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
 
             helper.maybe_compress_dataset(scene, output_path)
 
+        return {'FINISHED'}
+
+
+class ApplySphericalSpiral(bpy.types.Operator):
+    '''Keyframe the COS camera along a two-revolution spherical spiral on the BlenderNeRF Sphere'''
+    bl_idname = 'object.blendernerf_spherical_spiral'
+    bl_label = 'Apply Spherical Spiral'
+    bl_description = 'Keyframe the selected COS camera along a two-revolution spherical spiral on the BlenderNeRF Sphere (NeRF synthetic test path). Uses Test Frames for the sample count'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        camera = scene.camera
+
+        if camera is None:
+            self.report({'ERROR'}, 'Be sure to have a selected camera!')
+            return {'CANCELLED'}
+
+        if camera.type != 'CAMERA':
+            self.report({'ERROR'}, 'The selected object must be a camera!')
+            return {'CANCELLED'}
+
+        if camera.name == CAMERA_NAME:
+            self.report({'ERROR'}, 'The BlenderNeRF training camera cannot use a spiral path. Choose another camera in the COS Camera field.')
+            return {'CANCELLED'}
+
+        if any(x == 0 for x in scene.sphere_scale):
+            self.report({'ERROR'}, 'The BlenderNeRF Sphere cannot be flat! Change its scale to be non zero in all axes.')
+            return {'CANCELLED'}
+
+        if scene.cos_nb_test_frames < 2:
+            self.report({'ERROR'}, 'Test Frames must be at least 2 to build a spiral path.')
+            return {'CANCELLED'}
+
+        if not scene.show_sphere:
+            scene.show_sphere = True
+
+        if EMPTY_NAME not in scene.objects:
+            self.report({'ERROR'}, 'Could not create the BlenderNeRF Sphere.')
+            return {'CANCELLED'}
+
+        frame_start, frame_end, n = helper.apply_spherical_spiral(scene, camera)
+        self.report({'INFO'}, f'Applied spherical spiral to {camera.name} ({n} frames, {frame_start}-{frame_end}) on the BlenderNeRF Sphere.')
         return {'FINISHED'}

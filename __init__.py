@@ -98,6 +98,7 @@ CLASSES = [
     sof_operator.SubsetOfFrames,
     ttc_operator.TrainTestCameras,
     cos_operator.CameraOnSphere,
+    cos_operator.ApplySphericalSpiral,
     blender_nerf_operator.BlenderNeRF_RenderPipeline
 ]
 

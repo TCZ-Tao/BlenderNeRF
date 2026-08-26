@@ -44,4 +44,7 @@ class COS_UI(bpy.types.Panel):
         layout.prop(scene, 'cos_dataset_name')
 
         layout.separator()
+        layout.operator('object.blendernerf_spherical_spiral', text='Apply Spherical Spiral')
+
+        layout.separator()
         layout.operator('object.camera_on_sphere', text='PLAY COS')

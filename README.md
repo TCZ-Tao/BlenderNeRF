@@ -123,9 +123,10 @@ Below are described the properties specific to each method (the `Name` property 
 * `Camera` (deactivated by default) : whether to show the camera used for registering the training data
 * `Upper Views` (deactivated by default) : whether to sample views from the upper training hemisphere only (rotation variant)
 * `Outwards` (deactivated by default) : whether to point the camera outwards of the training sphere
+* `Apply Spherical Spiral` : keyframe the selected camera along a two-revolution spherical spiral on the BlenderNeRF Sphere (the NeRF synthetic test path). The frame count follows `Test Frames`
 * `PLAY COS` : play the **Camera on Sphere** method operator to export NeRF data
 
-Note that activating the `Sphere` and `Camera` properties creates a `BlenderNeRF Sphere` empty object and a `BlenderNeRF Camera` camera object respectively. Please do not create any objects with these names manually, since this might break the add-on functionalities.
+Note that activating the `Sphere` and `Camera` properties creates a `BlenderNeRF Sphere` empty object and a `BlenderNeRF Camera` camera object respectively. `Apply Spherical Spiral` also creates a viewport-only `BlenderNeRF Spiral Path` curve. Please do not create any objects with these names manually, since this might break the add-on functionalities.
 
 `Frames` amount of training frames will be captured using the `BlenderNeRF Camera` object, starting from the scene start frame. Finally, keep in mind that the training camera is locked in place and cannot manually be moved.
 

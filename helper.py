@@ -10,6 +10,13 @@ from bpy.app.handlers import persistent
 # global addon script variables
 EMPTY_NAME = 'BlenderNeRF Sphere'
 CAMERA_NAME = 'BlenderNeRF Camera'
+SPIRAL_PATH_NAME = 'BlenderNeRF Spiral Path'
+SPIRAL_TRACK_NAME = 'BlenderNeRF Spiral Track'
+
+# NeRF blender-synthetic test path: two azimuth turns, one elevation cycle
+SPIRAL_REVOLUTIONS = 2
+SPIRAL_ELEV_MAX = math.radians(47.23205869382562)
+SPIRAL_ELEV_MIN = math.radians(7.125016255700351)
 
 ## property poll and update functions
 
@@ -36,6 +43,7 @@ def visualize_sphere(self, context):
         if CAMERA_NAME in scene.objects.keys() and scene.camera_exists:
             delete_camera(scene, CAMERA_NAME)
 
+        delete_spiral_path()
         objects = bpy.data.objects
         objects.remove(objects[EMPTY_NAME], do_unlink=True)
 
@@ -83,6 +91,15 @@ def delete_camera(scene, name):
         if name in block.name:
             bpy.data.cameras.remove(block)
 
+def delete_spiral_path():
+    if SPIRAL_PATH_NAME not in bpy.data.objects:
+        return
+    obj = bpy.data.objects[SPIRAL_PATH_NAME]
+    data = obj.data
+    bpy.data.objects.remove(obj, do_unlink=True)
+    if data is not None and data.users == 0:
+        bpy.data.curves.remove(data)
+
 # non uniform sampling when stretched or squeezed sphere
 def sample_from_sphere(scene):
     seed = (2654435761 * (scene.seed + 1)) ^ (805459861 * (scene.frame_current + 1))
@@ -104,6 +121,129 @@ def sample_from_sphere(scene):
     point = mathutils.Vector(scene.sphere_location) + rotation @ point
 
     return point
+
+def sphere_point_from_unit(scene, unit):
+    '''Map a unit-sphere direction onto the BlenderNeRF Sphere (radius, scale, rotation, location).'''
+    point = scene.sphere_radius * mathutils.Vector(scene.sphere_scale) * unit
+    rotation = mathutils.Euler(scene.sphere_rotation).to_matrix()
+    return mathutils.Vector(scene.sphere_location) + rotation @ point
+
+def spiral_unit_on_sphere(i, n):
+    '''Unit direction for frame i of n along the NeRF synthetic spherical spiral.
+
+    Azimuth starts at +Y and completes two revolutions (endpoint-exclusive, like
+    nerf_synthetic transforms_test.json). Elevation completes one cosine cycle
+    between SPIRAL_ELEV_MAX and SPIRAL_ELEV_MIN.
+    '''
+    t = i / float(n)
+    theta = math.pi / 2.0 + 2.0 * math.pi * SPIRAL_REVOLUTIONS * t
+    elev = 0.5 * (SPIRAL_ELEV_MAX + SPIRAL_ELEV_MIN) + 0.5 * (SPIRAL_ELEV_MAX - SPIRAL_ELEV_MIN) * math.cos(2.0 * math.pi * t)
+    cy = math.cos(elev)
+    return mathutils.Vector((cy * math.cos(theta), cy * math.sin(theta), math.sin(elev)))
+
+def spiral_positions_on_sphere(scene, n):
+    return [sphere_point_from_unit(scene, spiral_unit_on_sphere(i, n)) for i in range(n)]
+
+def iter_action_fcurves(id_data):
+    '''Yield fcurves from a legacy or layered (Blender 4.4+/5) Action.'''
+    ad = getattr(id_data, 'animation_data', None)
+    if ad is None or ad.action is None:
+        return
+    action = ad.action
+    fcurves = getattr(action, 'fcurves', None)
+    if fcurves is not None and len(fcurves) > 0:
+        for fc in fcurves:
+            yield fc
+        return
+    for layer in getattr(action, 'layers', []):
+        for strip in layer.strips:
+            bags = getattr(strip, 'channelbags', None)
+            if bags:
+                for bag in bags:
+                    for fc in bag.fcurves:
+                        yield fc
+            else:
+                bag = getattr(strip, 'channelbag', None)
+                if bag is not None:
+                    for fc in bag.fcurves:
+                        yield fc
+
+def set_location_keyframe_interpolation(id_data, interpolation='LINEAR'):
+    for fc in iter_action_fcurves(id_data):
+        if fc.data_path != 'location':
+            continue
+        for kp in fc.keyframe_points:
+            kp.interpolation = interpolation
+
+def world_to_local_location(obj, world_location):
+    if obj.parent is None:
+        return world_location.copy()
+    return obj.parent.matrix_world.inverted() @ world_location
+
+def ensure_spiral_track_to(camera, scene):
+    for c in list(camera.constraints):
+        if c.type != 'TRACK_TO' or c.name == SPIRAL_TRACK_NAME:
+            continue
+        tgt = getattr(c, 'target', None)
+        if tgt is not None and tgt.name == EMPTY_NAME:
+            camera.constraints.remove(c)
+
+    track = camera.constraints.get(SPIRAL_TRACK_NAME)
+    if track is None or track.type != 'TRACK_TO':
+        if track is not None:
+            camera.constraints.remove(track)
+        track = camera.constraints.new(type='TRACK_TO')
+        track.name = SPIRAL_TRACK_NAME
+    track.target = bpy.data.objects[EMPTY_NAME]
+    track.track_axis = 'TRACK_Z' if scene.outwards else 'TRACK_NEGATIVE_Z'
+    track.up_axis = 'UP_Y'
+    return track
+
+def update_spiral_path_curve(scene, positions):
+    delete_spiral_path()
+
+    curve_data = bpy.data.curves.new(SPIRAL_PATH_NAME, type='CURVE')
+    curve_data.dimensions = '3D'
+    curve_data.resolution_u = 2
+    curve_data.bevel_depth = max(0.002, 0.005 * scene.sphere_radius)
+    curve_data.bevel_resolution = 2
+    curve_data.use_fill_caps = True
+
+    spline = curve_data.splines.new('POLY')
+    n = len(positions)
+    spline.points.add(max(0, n - 1))
+    for i, p in enumerate(positions):
+        spline.points[i].co = (p.x, p.y, p.z, 1.0)
+
+    curve_obj = bpy.data.objects.new(SPIRAL_PATH_NAME, curve_data)
+    scene.collection.objects.link(curve_obj)
+    curve_obj.hide_render = True
+    curve_obj.show_in_front = True
+    curve_obj.color = (1.0, 0.45, 0.08, 1.0)
+    return curve_obj
+
+def apply_spherical_spiral(scene, camera):
+    '''Keyframe camera along a spherical spiral on the BlenderNeRF Sphere.'''
+    n = scene.cos_nb_test_frames
+    positions = spiral_positions_on_sphere(scene, n)
+
+    if camera.animation_data:
+        camera.animation_data_clear()
+
+    ensure_spiral_track_to(camera, scene)
+    update_spiral_path_curve(scene, positions)
+
+    frame_start = scene.frame_start
+    frame_end = frame_start + n - 1
+    scene.frame_end = frame_end
+
+    for i, world_loc in enumerate(positions):
+        camera.location = world_to_local_location(camera, world_loc)
+        camera.keyframe_insert(data_path='location', frame=frame_start + i)
+
+    set_location_keyframe_interpolation(camera, 'LINEAR')
+    scene.frame_set(frame_start)
+    return frame_start, frame_end, n
 
 ## two way property link between sphere and ui (property and handler functions)
 # https://blender.stackexchange.com/questions/261174/2-way-property-link-or-a-filtered-property-display
@@ -132,6 +272,12 @@ def properties_ui(self, context):
         bpy.context.scene.objects[CAMERA_NAME].constraints['Track To'].track_axis = 'TRACK_Z' if scene.outwards else 'TRACK_NEGATIVE_Z'
         upd_on()
 
+    camera = scene.camera
+    if camera is not None and SPIRAL_TRACK_NAME in camera.constraints:
+        upd_off()
+        camera.constraints[SPIRAL_TRACK_NAME].track_axis = 'TRACK_Z' if scene.outwards else 'TRACK_NEGATIVE_Z'
+        upd_on()
+
 # if empty sphere modified outside of ui panel, edit panel properties
 def properties_desgraph(scene):
     if scene.show_sphere and EMPTY_NAME in scene.objects.keys():
@@ -152,6 +298,7 @@ def properties_desgraph(scene):
         if CAMERA_NAME in scene.objects.keys() and scene.camera_exists:
             delete_camera(scene, CAMERA_NAME)
 
+        delete_spiral_path()
         scene.show_sphere = False
         scene.sphere_exists = False
 
@@ -258,6 +405,7 @@ def finalize_render(scene):
         if not scene.init_camera_exists:
             delete_camera(scene, CAMERA_NAME)
         if not scene.init_sphere_exists:
+            delete_spiral_path()
             objects = bpy.data.objects
             objects.remove(objects[EMPTY_NAME], do_unlink=True)
             scene.show_sphere = False
