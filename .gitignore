@@ -1,2 +1,6 @@
 .DS_Store
 __pycache__
+.codegraph/
+.cursor/
+.rtk/
+CLAUDE.md
