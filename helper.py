@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import random
 import math
@@ -343,6 +344,111 @@ def wants_test_render(scene):
 
 def wants_any_image_render(scene):
     return bool(scene.render_frames and gbuffer.selected_output_channels(scene))
+
+def _image_filename(image):
+    filepath = image.filepath_raw or image.filepath
+    if filepath:
+        name = os.path.basename(bpy.path.abspath(filepath).replace('\\', '/'))
+        if name:
+            return name
+    return image.name
+
+def _linked_from(socket):
+    if socket is not None and socket.is_linked:
+        return socket.links[0].from_node
+    return None
+
+def _downstream_nodes(start):
+    visited = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        if node is None or node in visited:
+            continue
+        visited.add(node)
+        yield node
+        for out in node.outputs:
+            for link in out.links:
+                stack.append(link.to_node)
+
+def _find_background_node(node_tree):
+    output = next((n for n in node_tree.nodes if n.type == 'OUTPUT_WORLD' and getattr(n, 'is_active_output', True)), None)
+    if output is None:
+        output = next((n for n in node_tree.nodes if n.type == 'OUTPUT_WORLD'), None)
+
+    start = _linked_from(output.inputs['Surface']) if output and 'Surface' in output.inputs else None
+    stack = [start] if start else []
+    visited = set()
+    while stack:
+        node = stack.pop()
+        if node is None or node in visited:
+            continue
+        visited.add(node)
+        if node.type == 'BACKGROUND':
+            return node
+        stack.extend(_linked_from(inp) for inp in node.inputs)
+
+    return next((n for n in node_tree.nodes if n.type == 'BACKGROUND'), None)
+
+def world_envmap_info(scene):
+    '''Return (envmap filename, background strength) from the World shader.'''
+    envmap = ''
+    envmap_inten = 1.0
+    world = scene.world
+    if world is None:
+        return envmap, envmap_inten
+
+    if not (world.use_nodes and world.node_tree):
+        return envmap, envmap_inten
+
+    node_tree = world.node_tree
+    env_texes = [n for n in node_tree.nodes if n.type == 'TEX_ENVIRONMENT' and n.image]
+    env_tex = None
+    background = None
+    for candidate in env_texes:
+        bg = next((n for n in _downstream_nodes(candidate) if n.type == 'BACKGROUND'), None)
+        if bg is not None:
+            env_tex = candidate
+            background = bg
+            break
+    if env_tex is None and env_texes:
+        env_tex = env_texes[0]
+    if background is None:
+        background = _find_background_node(node_tree)
+
+    if env_tex is not None:
+        envmap = _image_filename(env_tex.image)
+    if background is not None:
+        envmap_inten = float(background.inputs['Strength'].default_value)
+
+    return envmap, envmap_inten
+
+def render_spp(scene):
+    engine = scene.render.engine
+    if engine == 'CYCLES':
+        return int(scene.cycles.samples)
+    eevee = getattr(scene, 'eevee', None)
+    if eevee is not None:
+        for attr in ('taa_render_samples', 'taa_samples'):
+            if hasattr(eevee, attr):
+                return int(getattr(eevee, attr))
+    return 0
+
+def write_scene_metadata(scene, output_path, dataset_name):
+    '''Write a TensoIR-style scene metadata.json next to transforms_*.json.'''
+    scale = scene.render.resolution_percentage / 100.0
+    envmap, envmap_inten = world_envmap_info(scene)
+    data = {
+        'scene': dataset_name,
+        'imw': int(round(scene.render.resolution_x * scale)),
+        'imh': int(round(scene.render.resolution_y * scale)),
+        'envmap': envmap,
+        'envmap_inten': envmap_inten,
+        'spp': render_spp(scene),
+    }
+    filepath = os.path.join(output_path, 'metadata.json')
+    with open(filepath, 'w') as file:
+        json.dump(data, file, indent=4)
 
 def dataset_output_path(scene):
     dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)

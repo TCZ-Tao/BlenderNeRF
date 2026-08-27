@@ -33,6 +33,7 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
 
         if scene.logs: self.save_log_file(scene, output_path, method='SOF')
         if scene.splats: self.save_splats_ply(scene, output_path)
+        helper.write_scene_metadata(scene, output_path, scene.sof_dataset_name)
         gbuffer.write_material_id_json(scene, output_path)
 
         # initial properties might have changed since set_init_props update

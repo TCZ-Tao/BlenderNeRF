@@ -58,7 +58,7 @@ PROPS = [
     ('gbuffer_material_id_vis', bpy.props.BoolProperty(name='Material ID Viz', description='Render colorized material ID visualization into the material_id_vis folder', default=True) ),
     ('nerf', bpy.props.BoolProperty(name='NeRF', description='Whether to export the camera transforms.json files in the defaut NeRF file format convention', default=False) ),
     ('save_path', bpy.props.StringProperty(name='Save Path', description='Path to the output directory in which the synthetic dataset will be stored', subtype='DIR_PATH') ),
-    ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIPxxx', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),
+    ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIP', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),
 
     # global automatic properties
     ('init_frame_step', bpy.props.IntProperty(name='Initial Frame Step') ),
