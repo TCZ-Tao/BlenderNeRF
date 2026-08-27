@@ -1,6 +1,6 @@
 import os
 import bpy
-from . import helper, blender_nerf_operator
+from . import helper, blender_nerf_operator, gbuffer
 
 
 # subset of frames operator class
@@ -33,6 +33,7 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
 
         if scene.logs: self.save_log_file(scene, output_path, method='SOF')
         if scene.splats: self.save_splats_ply(scene, output_path)
+        gbuffer.write_material_id_json(scene, output_path)
 
         # initial properties might have changed since set_init_props update
         scene.init_frame_step = scene.frame_step
@@ -43,8 +44,8 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TEST', method='SOF')
             self.save_json(output_path, 'transforms_test.json', output_data)
 
-        needs_train_render = scene.train_data and scene.render_frames
-        needs_test_render = helper.wants_test_render(scene)
+        needs_train_render = scene.train_data and helper.wants_any_image_render(scene)
+        needs_test_render = helper.wants_test_render(scene) and helper.wants_any_image_render(scene)
 
         if scene.train_data:
             # training transforms
@@ -56,7 +57,8 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
                 os.makedirs(output_train, exist_ok=True)
                 scene.rendering = (True, False, False)
                 scene.frame_step = scene.train_frame_steps # update frame step
-                scene.render.filepath = os.path.join(output_train, '') # training frames path
+                first_channel = gbuffer.selected_output_channels(scene)[0]
+                scene.render.filepath = os.path.join(helper.images_output_dir(scene, 'train', first_channel), '')
 
         if needs_train_render or needs_test_render:
             if not any(scene.rendering):

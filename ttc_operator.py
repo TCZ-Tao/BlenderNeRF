@@ -1,6 +1,6 @@
 import os
 import bpy
-from . import helper, blender_nerf_operator
+from . import helper, blender_nerf_operator, gbuffer
 
 
 # train and test cameras operator class
@@ -35,6 +35,7 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
 
         if scene.logs: self.save_log_file(scene, output_path, method='TTC')
         if scene.splats: self.save_splats_ply(scene, output_path)
+        gbuffer.write_material_id_json(scene, output_path)
 
         # initial properties might have changed since set_init_props update
         scene.init_output_path = scene.render.filepath
@@ -45,8 +46,8 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
             output_test_data['frames'] = self.get_camera_extrinsics(scene, test_camera, mode='TEST', method='TTC')
             self.save_json(output_path, 'transforms_test.json', output_test_data)
 
-        needs_train_render = scene.train_data and scene.render_frames
-        needs_test_render = helper.wants_test_render(scene)
+        needs_train_render = scene.train_data and helper.wants_any_image_render(scene)
+        needs_test_render = helper.wants_test_render(scene) and helper.wants_any_image_render(scene)
 
         if scene.train_data:
             # training transforms
@@ -59,7 +60,8 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
                 scene.camera = train_camera
                 scene.rendering = (False, True, False)
                 scene.frame_end = scene.frame_start + scene.ttc_nb_frames - 1 # update end frame
-                scene.render.filepath = os.path.join(output_train, '') # training frames path
+                first_channel = gbuffer.selected_output_channels(scene)[0]
+                scene.render.filepath = os.path.join(helper.images_output_dir(scene, 'train', first_channel), '')
 
         if needs_train_render or needs_test_render:
             if not any(scene.rendering):

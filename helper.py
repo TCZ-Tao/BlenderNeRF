@@ -2,9 +2,11 @@ import os
 import shutil
 import random
 import math
+import traceback
 import mathutils
 import bpy
 from bpy.app.handlers import persistent
+from . import gbuffer
 
 
 # global addon script variables
@@ -339,11 +341,20 @@ JOB_CANCELLED = 3
 def wants_test_render(scene):
     return scene.test_data and scene.render_frames and not (scene.splats and scene.splats_test_dummy)
 
+def wants_any_image_render(scene):
+    return bool(scene.render_frames and gbuffer.selected_output_channels(scene))
+
 def dataset_output_path(scene):
     dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)
     method_dataset_name = dataset_names[list(scene.rendering).index(True)]
     output_dir = bpy.path.clean_name(method_dataset_name)
     return os.path.join(scene.save_path, output_dir)
+
+def images_output_dir(scene, split, channel):
+    base = os.path.join(dataset_output_path(scene), split)
+    if scene.gbuffer:
+        return os.path.join(base, channel)
+    return base
 
 def maybe_compress_dataset(scene, output_path):
     '''Optionally zip the dataset folder and delete the uncompressed copy.'''
@@ -351,6 +362,52 @@ def maybe_compress_dataset(scene, output_path):
         return
     shutil.make_archive(output_path, 'zip', output_path)
     shutil.rmtree(output_path)
+
+_pipeline_timer_registered = False
+
+
+def is_render_busy():
+    is_job = getattr(bpy.app, 'is_job_running', None)
+    if callable(is_job):
+        try:
+            if is_job('RENDER') or is_job('RENDER_PREVIEW'):
+                return True
+        except (TypeError, ValueError):
+            pass
+    return bool(getattr(bpy.app, 'is_rendering', False))
+
+
+def _keep_ui_display_type():
+    '''Blender 5 renamed Keep User Interface from KEEP_UI to NONE.'''
+    view = bpy.context.preferences.view
+    items = {item.identifier for item in view.bl_rna.properties['render_display_type'].enum_items}
+    if 'NONE' in items:
+        return 'NONE'
+    if 'KEEP_UI' in items:
+        return 'KEEP_UI'
+    return view.render_display_type
+
+
+def apply_hide_render_view(scene):
+    '''Switch Blender to Keep User Interface so the render result window does not open.'''
+    if not getattr(scene, 'hide_render_view', False):
+        return
+    view = bpy.context.preferences.view
+    if not getattr(scene, 'init_render_display_type', ''):
+        scene.init_render_display_type = view.render_display_type
+    view.render_display_type = _keep_ui_display_type()
+
+
+def restore_hide_render_view(scene):
+    stored = getattr(scene, 'init_render_display_type', '') or ''
+    if not stored:
+        return
+    try:
+        bpy.context.preferences.view.render_display_type = stored
+    except TypeError:
+        pass
+    scene.init_render_display_type = ''
+
 
 def invoke_animation_render():
     '''Start an animation render with a VIEW_3D override when possible.'''
@@ -367,27 +424,117 @@ def invoke_animation_render():
             if region is not None:
                 override['region'] = region
             with bpy.context.temp_override(**override):
-                bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
-            return
-    bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
+                return bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
+    return bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
 
-def begin_test_render(scene):
-    output_test = os.path.join(dataset_output_path(scene), 'test')
-    os.makedirs(output_test, exist_ok=True)
+def configure_train_timeline(scene):
+    '''Re-apply train camera and frame range. Animation renders must not inherit a drifted timeline.'''
+    if scene.rendering[0]:  # SOF
+        scene.frame_step = scene.train_frame_steps
+    elif scene.rendering[1]:  # TTC
+        if scene.camera_train_target is not None:
+            scene.camera = scene.camera_train_target
+        scene.frame_end = scene.frame_start + scene.ttc_nb_frames - 1
+    elif scene.rendering[2]:  # COS
+        if CAMERA_NAME in scene.objects:
+            scene.camera = scene.objects[CAMERA_NAME]
+        scene.frame_end = scene.frame_start + scene.cos_nb_frames - 1
 
+def configure_test_timeline(scene):
     if scene.rendering[0]:  # SOF : restore default frame step, keep full timeline
         scene.frame_step = scene.init_frame_step
     elif scene.rendering[1]:  # TTC : switch to test camera over the scene timeline
         scene.camera = scene.camera_test_target
         scene.frame_end = scene.init_frame_end
     elif scene.rendering[2]:  # COS : selected camera, Test Frames count
-        scene.camera = scene.init_active_camera
+        restore_user_camera(scene)
         scene.frame_end = scene.frame_start + scene.cos_nb_test_frames - 1
 
+def restore_user_camera(scene):
+    '''Put the COS Camera field back to the user camera, never leave BlenderNeRF Camera selected.'''
+    name = getattr(scene, 'init_active_camera_name', '') or ''
+    cam = scene.init_active_camera
+    if name and name in scene.objects and scene.objects[name].type == 'CAMERA':
+        scene.camera = scene.objects[name]
+        return
+    if cam is not None:
+        scene.camera = cam
+
+def start_render_pass(scene):
+    '''Configure the current G-buffer/RGB pass and invoke an animation render.'''
+    scene.nerf_job_status = JOB_RUNNING
+    current = gbuffer.current_pass()
+    if current is None:
+        scene.nerf_job_status = JOB_DONE
+        finalize_render(scene)
+        return
+
+    split, channel = current
+    if split == 'test':
+        configure_test_timeline(scene)
+    else:
+        configure_train_timeline(scene)
+
+    print(
+        f"[BlenderNeRF] {split}/{channel}  "
+        f"frames {scene.frame_start}-{scene.frame_end} step {scene.frame_step}  "
+        f"camera {scene.camera.name if scene.camera else None}"
+    )
+
+    out_dir = images_output_dir(scene, split, channel)
+    gbuffer.apply_pass_settings(scene, channel, out_dir)
+    apply_hide_render_view(scene)
+    invoke_animation_render()
+
+def schedule_next_render_pass():
+    global _pipeline_timer_registered
+    if _pipeline_timer_registered:
+        return
+    _pipeline_timer_registered = True
+    bpy.app.timers.register(_continue_render_pipeline, first_interval=0.35)
+
+def _continue_render_pipeline():
+    global _pipeline_timer_registered
+    scene = bpy.context.scene
+
+    if is_render_busy():
+        return 0.25
+
+    _pipeline_timer_registered = False
+
+    if not any(scene.rendering):
+        return None
+
+    if scene.nerf_job_status == JOB_CANCELLED:
+        finalize_render(scene)
+        return None
+
+    if scene.nerf_job_status != JOB_DONE:
+        return None
+
+    try:
+        if gbuffer.advance_pass():
+            start_render_pass(scene)
+        else:
+            finalize_render(scene)
+    except Exception:
+        traceback.print_exc()
+        finalize_render(scene)
+    return None
+
+def begin_test_render(scene):
+    configure_test_timeline(scene)
+    channels = gbuffer.selected_output_channels(scene)
+    channel = channels[0] if channels else gbuffer.RGBA_CHANNEL
+    output_test = images_output_dir(scene, 'test', channel)
+    os.makedirs(output_test, exist_ok=True)
     scene.render.filepath = os.path.join(output_test, '')
     invoke_animation_render()
 
 def finalize_render(scene):
+    gbuffer.end_job(scene)
+    restore_hide_render_view(scene)
+
     if not any(scene.rendering):
         scene.nerf_job_status = JOB_IDLE
         return
@@ -402,6 +549,7 @@ def finalize_render(scene):
         scene.frame_end = scene.init_frame_end
 
     if scene.rendering[2]:
+        restore_user_camera(scene)
         if not scene.init_camera_exists:
             delete_camera(scene, CAMERA_NAME)
         if not scene.init_sphere_exists:
@@ -411,7 +559,6 @@ def finalize_render(scene):
             scene.show_sphere = False
             scene.sphere_exists = False
 
-        scene.camera = scene.init_active_camera
         scene.frame_end = scene.init_frame_end
 
     scene.rendering = (False, False, False)
@@ -426,11 +573,13 @@ def finalize_render(scene):
 def post_render_complete(scene):
     if any(scene.rendering):
         scene.nerf_job_status = JOB_DONE
+        schedule_next_render_pass()
 
 @persistent
 def post_render_cancel(scene):
-    if any(scene.rendering) and scene.nerf_job_status != JOB_DONE:
+    if any(scene.rendering) and scene.nerf_job_status == JOB_RUNNING:
         scene.nerf_job_status = JOB_CANCELLED
+        finalize_render(scene)
 
 # set initial property values (bpy.data and bpy.context require a loaded scene)
 @persistent

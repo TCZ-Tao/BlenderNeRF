@@ -1,6 +1,6 @@
 import os
 import bpy
-from . import helper, blender_nerf_operator
+from . import helper, blender_nerf_operator, gbuffer
 
 
 # global addon script variables
@@ -37,6 +37,7 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
 
         if scene.logs: self.save_log_file(scene, output_path, method='COS')
         if scene.splats: self.save_splats_ply(scene, output_path)
+        gbuffer.write_material_id_json(scene, output_path)
 
         # initial property might have changed since set_init_props update
         scene.init_output_path = scene.render.filepath
@@ -46,14 +47,15 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
         scene.init_camera_exists = scene.show_camera
         scene.init_frame_end = scene.frame_end
         scene.init_active_camera = camera
+        scene.init_active_camera_name = camera.name
 
         if scene.test_data:
             # testing transforms (selected camera, Test Frames)
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TEST', method='COS')
             self.save_json(output_path, 'transforms_test.json', output_data)
 
-        needs_train_render = scene.train_data and scene.render_frames
-        needs_test_render = helper.wants_test_render(scene)
+        needs_train_render = scene.train_data and helper.wants_any_image_render(scene)
+        needs_test_render = helper.wants_test_render(scene) and helper.wants_any_image_render(scene)
 
         if scene.train_data:
             if not scene.show_camera: scene.show_camera = True
@@ -72,7 +74,8 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
                 os.makedirs(output_train, exist_ok=True)
                 scene.rendering = (False, False, True)
                 scene.frame_end = scene.frame_start + scene.cos_nb_frames - 1 # update end frame
-                scene.render.filepath = os.path.join(output_train, '') # training frames path
+                first_channel = gbuffer.selected_output_channels(scene)[0]
+                scene.render.filepath = os.path.join(helper.images_output_dir(scene, 'train', first_channel), '')
 
         if needs_train_render or needs_test_render:
             if not any(scene.rendering):

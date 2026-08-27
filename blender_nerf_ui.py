@@ -28,6 +28,7 @@ class BlenderNeRF_UI(bpy.types.Panel):
 
             layout.separator()
             layout.prop(scene, 'render_frames')
+            layout.prop(scene, 'hide_render_view')
 
             layout.prop(scene, 'logs')
             layout.prop(scene, 'splats', text='Gaussian Points (PLY file)')
@@ -38,6 +39,21 @@ class BlenderNeRF_UI(bpy.types.Panel):
                 row = layout.row(align=True)
                 row.prop(scene, 'splats_test_dummy', toggle=True, text='Dummy')
                 row.prop(scene, 'splats_test_dummy', toggle=True, text='Full', invert_checkbox=True)
+
+            layout.prop(scene, 'gbuffer', text='G-buffer Maps')
+
+            if scene.gbuffer:
+                box = layout.box()
+                col = box.column(align=True)
+                col.prop(scene, 'gbuffer_rgba')
+                col.prop(scene, 'gbuffer_albedo')
+                col.prop(scene, 'gbuffer_roughness')
+                col.prop(scene, 'gbuffer_metallic')
+                col.prop(scene, 'gbuffer_geometric_normal')
+                col.prop(scene, 'gbuffer_shading_normal')
+                col.prop(scene, 'gbuffer_linear_depth')
+                col.prop(scene, 'gbuffer_material_id')
+                col.prop(scene, 'gbuffer_material_id_vis')
 
             layout.separator()
             layout.label(text='File Format')

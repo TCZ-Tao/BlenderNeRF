@@ -3,7 +3,7 @@ import math
 import json
 import datetime
 import bpy
-from . import helper
+from . import helper, gbuffer
 
 
 # global addon script variables
@@ -105,6 +105,8 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             scene.frame_set(frame)
             filename = os.path.basename( scene.render.frame_path(frame=frame) )
             filedir = OUTPUT_TRAIN * (mode == 'TRAIN') + OUTPUT_TEST * (mode == 'TEST')
+            if scene.gbuffer:
+                filedir = os.path.join(filedir, gbuffer.RGBA_CHANNEL)
 
             frame_data = {
                 'file_path': os.path.join(filedir, os.path.splitext(filename)[0] if scene.splats else filename),
@@ -228,6 +230,12 @@ class BlenderNeRF_Operator(bpy.types.Operator):
         if scene.splats and scene.render.image_settings.file_format != 'PNG':
             error_messages.append('Gaussian Splatting requires PNG file extensions!')
 
+        if scene.gbuffer and scene.render_frames:
+            if not gbuffer.selected_output_channels(scene):
+                error_messages.append('Select at least one G-buffer channel to render!')
+            elif gbuffer.needs_mesh_materials(scene) and not gbuffer.mesh_materials(scene):
+                error_messages.append('G-buffer maps require mesh objects with node materials!')
+
         return error_messages
 
     def save_log_file(self, scene, directory, method='SOF'):
@@ -241,6 +249,8 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             'Test': scene.test_data,
             'AABB': scene.aabb,
             'Render Frames': scene.render_frames,
+            'G-buffer Maps': scene.gbuffer,
+            'G-buffer Channels': gbuffer.selected_output_channels(scene) if scene.gbuffer else [],
             'File Format': 'NeRF' if scene.nerf else 'NGP',
             'Save Path': scene.save_path,
             'Compress to ZIP': scene.compress_to_zip,
@@ -276,7 +286,7 @@ class BlenderNeRF_Operator(bpy.types.Operator):
 
 
 class BlenderNeRF_RenderPipeline(bpy.types.Operator):
-    '''Modal train-then-test render pipeline.'''
+    '''Train-then-test (and G-buffer) render pipeline.'''
     bl_idname = 'object.blendernerf_render_pipeline'
     bl_label = 'BlenderNeRF Render Pipeline'
     bl_options = {'INTERNAL'}
@@ -288,50 +298,16 @@ class BlenderNeRF_RenderPipeline(bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
-        self.phase = 'train' if self.do_train else 'test'
-        wm = context.window_manager
-        self._timer = wm.event_timer_add(0.25, window=context.window)
-        wm.modal_handler_add(self)
-        self.start_phase(context)
-        return {'RUNNING_MODAL'}
-
-    def start_phase(self, context):
         scene = context.scene
-        scene.nerf_job_status = helper.JOB_RUNNING
-        if self.phase == 'test':
-            helper.begin_test_render(scene)
-        else:
-            helper.invoke_animation_render()
-
-    def modal(self, context, event):
-        if event.type != 'TIMER':
-            return {'PASS_THROUGH'}
-
-        scene = context.scene
-        status = scene.nerf_job_status
-
-        if status == helper.JOB_RUNNING:
-            return {'PASS_THROUGH'}
-
-        if status == helper.JOB_CANCELLED:
+        passes = gbuffer.build_passes(self.do_train, self.do_test, scene)
+        if not passes:
             helper.finalize_render(scene)
-            self.cleanup(context)
             return {'FINISHED'}
 
-        if status == helper.JOB_DONE:
-            if self.phase == 'train' and self.do_test:
-                self.phase = 'test'
-                self.start_phase(context)
-                return {'RUNNING_MODAL'}
-
+        gbuffer.begin_job(scene, passes)
+        try:
+            helper.start_render_pass(scene)
+        except Exception as exc:
+            self.report({'ERROR'}, str(exc))
             helper.finalize_render(scene)
-            self.cleanup(context)
-            return {'FINISHED'}
-
-        return {'PASS_THROUGH'}
-
-    def cleanup(self, context):
-        wm = context.window_manager
-        if getattr(self, '_timer', None) is not None:
-            wm.event_timer_remove(self._timer)
-            self._timer = None
+        return {'FINISHED'}

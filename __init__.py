@@ -2,8 +2,11 @@ import bpy
 
 # Reload Scripts (F3) re-imports this file; without importlib.reload, Python
 # keeps cached submodules, so UI/operator edits never show up.
+from . import gbuffer, helper, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
+
 if 'bpy' in locals():
     import importlib
+    importlib.reload(gbuffer)
     importlib.reload(helper)
     importlib.reload(blender_nerf_operator)
     importlib.reload(blender_nerf_ui)
@@ -13,8 +16,6 @@ if 'bpy' in locals():
     importlib.reload(sof_operator)
     importlib.reload(ttc_operator)
     importlib.reload(cos_operator)
-else:
-    from . import helper, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
 
 
 # blender info
@@ -41,9 +42,20 @@ PROPS = [
     ('test_data', bpy.props.BoolProperty(name='Test', description='Construct the testing data (camera poses and, if Render Frames is on, images)', default=True) ),
     ('aabb', bpy.props.IntProperty(name='AABB', description='AABB scale as defined in Instant NGP', default=4, soft_min=1, soft_max=128) ),
     ('render_frames', bpy.props.BoolProperty(name='Render Frames', description='Whether train/test frames should be rendered. If not selected, only the transforms.json files will be generated', default=True) ),
+    ('hide_render_view', bpy.props.BoolProperty(name='Hide Render View', description='Keep the current workspace instead of opening the render result window', default=False) ),
     ('logs', bpy.props.BoolProperty(name='Save Log File', description='Whether to create a log file containing information on the BlenderNeRF run', default=False) ),
     ('splats', bpy.props.BoolProperty(name='Gaussian Points', description='Whether to export a points3d.ply file for Gaussian Splatting', default=False) ),
     ('splats_test_dummy', bpy.props.BoolProperty(name='Dummy Test Camera', description='Whether to export a dummy test transforms.json file or the full set of test camera poses', default=True) ),
+    ('gbuffer', bpy.props.BoolProperty(name='G-buffer Maps', description='Whether to render extra unlit G-buffer maps (albedo, roughness, normals, depth, material ID) into per-channel folders', default=False) ),
+    ('gbuffer_rgba', bpy.props.BoolProperty(name='RGBA', description='Render the original RGB(A) frames into the rgba folder', default=True) ),
+    ('gbuffer_albedo', bpy.props.BoolProperty(name='Albedo', description='Render base color / albedo into the albedo folder', default=True) ),
+    ('gbuffer_roughness', bpy.props.BoolProperty(name='Roughness', description='Render roughness into the roughness folder', default=True) ),
+    ('gbuffer_metallic', bpy.props.BoolProperty(name='Metallic', description='Render metallic into the metallic folder', default=True) ),
+    ('gbuffer_geometric_normal', bpy.props.BoolProperty(name='Geometric Normal', description='Render camera-space geometric normals (no bump/normal maps) into the geometric_normal folder', default=True) ),
+    ('gbuffer_shading_normal', bpy.props.BoolProperty(name='Shading Normal', description='Render camera-space shading normals (with bump/normal maps) into the shading_normal folder', default=True) ),
+    ('gbuffer_linear_depth', bpy.props.BoolProperty(name='Linear Depth', description='Render camera-space linear depth (EXR) into the linear_depth folder', default=True) ),
+    ('gbuffer_material_id', bpy.props.BoolProperty(name='Material ID', description='Render numeric material IDs (EXR) into the material_id folder', default=True) ),
+    ('gbuffer_material_id_vis', bpy.props.BoolProperty(name='Material ID Viz', description='Render colorized material ID visualization into the material_id_vis folder', default=True) ),
     ('nerf', bpy.props.BoolProperty(name='NeRF', description='Whether to export the camera transforms.json files in the defaut NeRF file format convention', default=False) ),
     ('save_path', bpy.props.StringProperty(name='Save Path', description='Path to the output directory in which the synthetic dataset will be stored', subtype='DIR_PATH') ),
     ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIPxxx', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),
@@ -51,6 +63,7 @@ PROPS = [
     # global automatic properties
     ('init_frame_step', bpy.props.IntProperty(name='Initial Frame Step') ),
     ('init_output_path', bpy.props.StringProperty(name='Initial Output Path', subtype='DIR_PATH') ),
+    ('init_render_display_type', bpy.props.StringProperty(name='Initial Render Display Type', default='') ),
     ('rendering', bpy.props.BoolVectorProperty(name='Rendering', description='Whether one of the SOF, TTC or COS methods is rendering', default=(False, False, False), size=3) ),
     ('nerf_job_status', bpy.props.IntProperty(name='NeRF Job Status', description='0 idle, 1 running, 2 done, 3 cancelled', default=0) ),
     ('blendernerf_version', bpy.props.StringProperty(name='BlenderNeRF Version', default=VERSION) ),
@@ -86,6 +99,7 @@ PROPS = [
     ('camera_exists', bpy.props.BoolProperty(name='Camera Exists', description='Whether the camera exists', default=False) ),
     ('init_camera_exists', bpy.props.BoolProperty(name='Init camera exists', description='Whether the camera initially exists', default=False) ),
     ('init_active_camera', bpy.props.PointerProperty(type=bpy.types.Object, name='Init active camera', description='Pointer to initial active camera', poll=helper.poll_is_camera) ),
+    ('init_active_camera_name', bpy.props.StringProperty(name='Init active camera name', default='') ),
     ('init_frame_end', bpy.props.IntProperty(name='Initial Frame End') ),
 ]
 
