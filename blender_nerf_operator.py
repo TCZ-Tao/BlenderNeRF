@@ -2,6 +2,8 @@ import os
 import math
 import json
 import datetime
+import mathutils
+import numpy as np
 import bpy
 from . import helper, gbuffer
 
@@ -10,7 +12,8 @@ from . import helper, gbuffer
 OUTPUT_TRAIN = 'train'
 OUTPUT_TEST = 'test'
 CAMERA_NAME = 'BlenderNeRF Camera'
-TMP_VERTEX_COLORS = 'blendernerf_vertex_colors_tmp'
+# 3DGS SH0 coefficient used when converting random harmonics to RGB
+SPLATS_SH_C0 = 0.28209479177387814
 
 
 # blender nerf operator parent class
@@ -86,7 +89,7 @@ class BlenderNeRF_Operator(bpy.types.Operator):
         assert mode == 'TRAIN' or mode == 'TEST'
         assert method == 'SOF' or method == 'TTC' or method == 'COS'
 
-        if scene.splats and scene.splats_test_dummy and mode == 'TEST':
+        if scene.splats_test_dummy and mode == 'TEST':
             return []
 
         initFrame = scene.frame_current
@@ -119,52 +122,65 @@ class BlenderNeRF_Operator(bpy.types.Operator):
 
         return camera_extr_dict
 
-    # export vertex colors for each visible mesh
+    def visible_meshes_world_aabb(self, scene):
+        '''World-space AABB of render-visible meshes (evaluated, so modifiers count).'''
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        mins = None
+        maxs = None
+
+        for obj in scene.objects:
+            if obj.type != 'MESH' or not self.is_object_visible(obj):
+                continue
+
+            eval_obj = obj.evaluated_get(depsgraph)
+            matrix = eval_obj.matrix_world
+            for corner in eval_obj.bound_box:
+                world = matrix @ mathutils.Vector(corner)
+                if mins is None:
+                    mins = world.copy()
+                    maxs = world.copy()
+                else:
+                    mins.x = min(mins.x, world.x)
+                    mins.y = min(mins.y, world.y)
+                    mins.z = min(mins.z, world.z)
+                    maxs.x = max(maxs.x, world.x)
+                    maxs.y = max(maxs.y, world.y)
+                    maxs.z = max(maxs.z, world.z)
+
+        return mins, maxs
+
     def save_splats_ply(self, scene, directory):
-        # create temporary vertex colors
-        for obj in scene.objects:
-            if obj.type == 'MESH':
-                if not obj.data.vertex_colors:
-                    obj.data.vertex_colors.new(name=TMP_VERTEX_COLORS)
+        '''Random point cloud in the scene AABB, matching 3DGS NeRF-synthetic init.'''
+        mins, maxs = self.visible_meshes_world_aabb(scene)
+        if mins is None:
+            raise RuntimeError('Gaussian Points requires at least one visible mesh to compute the scene AABB.')
 
-        view_layer = bpy.context.view_layer
-        if view_layer.objects.active is None and bpy.data.objects:
-            self.report({'INFO'}, 'No object active. Setting first object as active.')
-            view_layer.objects.active = bpy.data.objects[0]
+        n = scene.splats_nb_points
+        lo = np.array(mins, dtype=np.float64)
+        hi = np.array(maxs, dtype=np.float64)
+        rng = np.random.default_rng(scene.seed)
+        xyz = rng.random((n, 3)) * (hi - lo) + lo
+        shs = rng.random((n, 3)) / 255.0
+        rgb = np.clip(shs * SPLATS_SH_C0 + 0.5, 0.0, 1.0) * 255.0
+        rgb = np.rint(rgb).astype(np.uint8)
+        normals = np.zeros((n, 3), dtype=np.float64)
 
-        init_active_object = view_layer.objects.active
-        init_mode = init_active_object.mode if init_active_object is not None else 'OBJECT'
-        if init_active_object is not None and init_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-        init_selected_objects = list(bpy.context.selected_objects)
-        for obj in scene.objects:
-            obj.select_set(False)
-
-        # select only visible meshes
-        for obj in scene.objects:
-            if obj.type == 'MESH' and self.is_object_visible(obj):
-                obj.select_set(True)
-
-        # save ply file
-        bpy.ops.wm.ply_export(filepath=os.path.join(directory, 'points3d.ply'), export_normals=True, export_attributes=False, ascii_format=True)
-
-        # remove temporary vertex colors
-        for obj in scene.objects:
-            if obj.type == 'MESH' and self.is_object_visible(obj):
-                if obj.data.vertex_colors and TMP_VERTEX_COLORS in obj.data.vertex_colors:
-                    obj.data.vertex_colors.remove(obj.data.vertex_colors[TMP_VERTEX_COLORS])
-
-        bpy.context.view_layer.objects.active = init_active_object
-        for obj in scene.objects:
-            obj.select_set(False)
-
-        # reselect previously selected objects
-        for obj in init_selected_objects:
-            obj.select_set(True)
-
-        if init_active_object is not None and init_mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode=init_mode)
+        filepath = os.path.join(directory, 'points3d.ply')
+        with open(filepath, 'w', encoding='ascii', newline='\n') as file:
+            file.write('ply\n')
+            file.write('format ascii 1.0\n')
+            file.write(f'element vertex {n}\n')
+            file.write('property float x\n')
+            file.write('property float y\n')
+            file.write('property float z\n')
+            file.write('property float nx\n')
+            file.write('property float ny\n')
+            file.write('property float nz\n')
+            file.write('property uchar red\n')
+            file.write('property uchar green\n')
+            file.write('property uchar blue\n')
+            file.write('end_header\n')
+            np.savetxt(file, np.column_stack((xyz, normals, rgb)), fmt='%.6f %.6f %.6f %.6f %.6f %.6f %d %d %d')
 
     def save_json(self, directory, filename, data, indent=4):
         filepath = os.path.join(directory, filename)
@@ -224,12 +240,16 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             error_messages.append('The BlenderNeRF Sphere cannot be flat! Change its scale to be non zero in all axes.')
 
         if not scene.nerf and not self.is_power_of_two(scene.aabb):
-            error_messages.append('AABB scale needs to be a power of two!')
+            error_messages.append('iNGP AABB scale needs to be a power of two!')
 
         if scene.save_path == '':
             error_messages.append('Save path cannot be empty!')
 
-        if scene.splats and not scene.test_data:
+        if scene.splats:
+            if self.visible_meshes_world_aabb(scene)[0] is None:
+                error_messages.append('Gaussian Points requires at least one visible mesh to compute the scene AABB!')
+
+        if scene.splats and not scene.test_data and not scene.splats_test_dummy:
             error_messages.append('Gaussian Splatting requires test data!')
 
         if scene.splats and scene.render.image_settings.file_format != 'PNG':
@@ -252,7 +272,10 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             'Date and Time' : now.strftime("%d/%m/%Y %H:%M:%S"),
             'Train': scene.train_data,
             'Test': scene.test_data,
-            'AABB': scene.aabb,
+            'Dummy Test Camera File': scene.splats_test_dummy,
+            'iNGP AABB': scene.aabb,
+            'Gaussian Points': scene.splats,
+            'Gaussian Points Count': scene.splats_nb_points if scene.splats else 0,
             'Render Frames': scene.render_frames,
             'G-buffer Maps': scene.gbuffer,
             'G-buffer Channels': gbuffer.selected_output_channels(scene) if scene.gbuffer else [],

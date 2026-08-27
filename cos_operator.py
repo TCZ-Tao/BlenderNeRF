@@ -50,7 +50,7 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
         scene.init_active_camera = camera
         scene.init_active_camera_name = camera.name
 
-        if scene.test_data:
+        if helper.wants_test_json(scene):
             # testing transforms (selected camera, Test Frames)
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TEST', method='COS')
             self.save_json(output_path, 'transforms_test.json', output_data)

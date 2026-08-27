@@ -80,22 +80,23 @@ The add-on properties panel is available under `3D View > N panel > BlenderNeRF`
 
 * `Train` (activated by default) : whether to register training data (renderings + camera information)
 * `Test` (activated by default) : whether to register testing data (camera poses and, if `Render Frames` is on, images)
-* `AABB` (by default set to **4**) : aabb scale parameter as described in Instant NGP (more details below)
+* `iNGP AABB` (by default set to **4**) : aabb scale parameter as described in Instant NGP (more details below). Enable `Show` to preview the origin-centered cube in the viewport
 * `Render Frames` (activated by default) : whether to render train/test images. If off, only the `transforms_*.json` files are written
 * `Hide Render View` (deactivated by default) : keep the current workspace instead of opening the render result window
 * `Save Log File` (deactivated by default) : whether to save a log file containing reproducibility information on the **BlenderNeRF** run
 * `File Format` (**NGP** by default) : whether to export the camera files in the Instant NGP or defaut NeRF file format convention
 * `Gaussian Points` (deactivated by default) : whether to export a `points3d.ply` file for Gaussian Splatting
-* `Gaussian Test Camera Poses` (**Dummy** by default): whether to export a dummy test camera file or the full set of test camera poses (only with `Gaussian Points`)
+* `Points` (by default set to **100000**) : number of random initialization points sampled uniformly in the scene AABB (only with `Gaussian Points`)
+* `Dummy Test Camera File` (deactivated by default) : write an empty `transforms_test.json` and skip test-image rendering, even if `Test` is on
 * `G-buffer Maps` (deactivated by default) : whether to render extra unlit maps into per-channel folders (see [G-buffer Maps](#g-buffer-maps))
 * `Save Path` (empty by default) : path to the output directory in which the dataset will be created
 * `Compress to ZIP` (deactivated by default) : archive the dataset as a ZIP and delete the uncompressed folder. Leave off to keep files under `<save path>/<name>`
 
-If the `Gaussian Points` property is active, **BlenderNeRF** will create an additional `points3d.ply` file from all visible meshes (at render time) where each vertex will be used as initialization point. Vertex colors will be stored if available, and set to black otherwise.
+If the `Gaussian Points` property is active, **BlenderNeRF** writes a `points3d.ply` of uniformly random points inside the world-space AABB of all render-visible meshes (modifiers included). This matches the 3D Gaussian Splatting initialization used for NeRF synthetic datasets (default 100000 points, random SH0 colors, zero normals). It does **not** use mesh vertices, and it does **not** use the `iNGP AABB` panel value.
 
-The [**Gaussian Splatting**](https://github.com/graphdeco-inria/gaussian-splatting) repository natively supports **NeRF** datasets, but requires both train and test data. The `Dummy` option for the `Gaussian Test Camera Poses` property creates an empty test camera pose file and skips test-image rendering. The `Full` option exports the default test camera poses; with `Test` and `Render Frames` on, the `test` folder is rendered in the same run.
+The [**Gaussian Splatting**](https://github.com/graphdeco-inria/gaussian-splatting) repository natively supports **NeRF** datasets, but requires both train and test data. `Dummy Test Camera File` writes an empty `transforms_test.json` (`frames: []`) so that loader can run without real test views, and skips test-image rendering even when `Test` is on. Leave it off to export the full test camera poses; with `Test` and `Render Frames` on, the `test` folder is rendered in the same run.
 
-`AABB` is restricted to be an integer power of 2, it defines the side length of the bounding box volume in which NeRF will trace rays. The property was introduced with **NVIDIA's [Instant NGP](https://github.com/NVlabs/instant-ngp)** version of NeRF.
+`iNGP AABB` is restricted to be an integer power of 2, it defines the side length of the bounding box volume in which NeRF will trace rays. The cube is centered at the world origin: with the default value **4**, it spans `[-2, 2]` on each axis. Enable `Show` next to the property to draw a viewport-only `BlenderNeRF AABB` empty. The property was introduced with **NVIDIA's [Instant NGP](https://github.com/NVlabs/instant-ngp)** version of NeRF.
 
 The `File Format` property can either be **NGP** or **NeRF**. The **NGP** file format convention is the same as the **NeRF** one, with a few additional parameters which can be accessed by Instant NGP.
 
@@ -161,7 +162,7 @@ Below are described the properties specific to each method (the `Name` property 
 * `Apply Spherical Spiral` : keyframe the selected **Test Camera** along a two-revolution spherical spiral on the BlenderNeRF Sphere (the NeRF synthetic test path). The frame count follows `Test Frames`
 * `PLAY COS` : play the **Camera on Sphere** method operator to export NeRF data
 
-Note that activating the `Sphere` and `Camera` properties creates a `BlenderNeRF Sphere` empty object and a `BlenderNeRF Camera` camera object respectively. `Apply Spherical Spiral` also creates a viewport-only `BlenderNeRF Spiral Path` curve. Please do not create any objects with these names manually, since this might break the add-on functionalities.
+Note that activating the `Sphere` and `Camera` properties creates a `BlenderNeRF Sphere` empty object and a `BlenderNeRF Camera` camera object respectively. `Show` next to `iNGP AABB` creates a viewport-only `BlenderNeRF AABB` cube empty. `Apply Spherical Spiral` also creates a viewport-only `BlenderNeRF Spiral Path` curve. Please do not create any objects with these names manually, since this might break the add-on functionalities.
 
 `Train Frames` amount of training frames will be captured using the `BlenderNeRF Camera` object, starting from the scene start frame. The training camera is locked in place and cannot manually be moved. After PLAY COS, the scene camera is restored to the **Test Camera** (never left on `BlenderNeRF Camera`).
 
@@ -195,8 +196,8 @@ NVIDIA provides a few helpful tips on how to train a NeRF model using [Instant N
 * Testing views should not deviate too much from training views
 * Scene movement, motion blur or blurring artefacts can degrade the reconstruction quality
 * The captured scene should be at least one Blender unit away from the camera
-* Keep `AABB` as tight as possible to the scene scale, higher values will slow down training
-* If the reconstruction quality appears blurry, start by adjusting `AABB` while keeping it a power of 2
+* Keep `iNGP AABB` as tight as possible to the scene scale, higher values will slow down training
+* If the reconstruction quality appears blurry, start by adjusting `iNGP AABB` while keeping it a power of 2
 * Avoid adjusting the camera focal lengths during the animation, the vanilla NeRF methods do not support multiple focal lengths
 * Avoid extreme focal lengths, values between 30 mm and 70 mm work well in practice
 * A `Vertical` camera sensor fit sometimes leads to distorted NeRF volumes, avoid it if possible

@@ -42,7 +42,7 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
         scene.init_output_path = scene.render.filepath
         scene.init_frame_end = scene.frame_end
 
-        if scene.test_data:
+        if helper.wants_test_json(scene):
             # testing transforms
             output_test_data['frames'] = self.get_camera_extrinsics(scene, test_camera, mode='TEST', method='TTC')
             self.save_json(output_path, 'transforms_test.json', output_test_data)

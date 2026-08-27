@@ -20,11 +20,13 @@ class BlenderNeRF_UI(bpy.types.Panel):
         row.prop(scene, 'train_data', toggle=True)
         row.prop(scene, 'test_data', toggle=True)
 
-        if not (scene.train_data or scene.test_data):
+        if not (scene.train_data or scene.test_data or scene.splats_test_dummy):
             layout.label(text='Nothing will happen!')
 
         else:
-            layout.prop(scene, 'aabb')
+            row = layout.row(align=True)
+            row.prop(scene, 'aabb')
+            row.prop(scene, 'show_aabb', toggle=True, text='Show')
 
             layout.separator()
             layout.prop(scene, 'render_frames')
@@ -34,11 +36,9 @@ class BlenderNeRF_UI(bpy.types.Panel):
             layout.prop(scene, 'splats', text='Gaussian Points (PLY file)')
 
             if scene.splats:
-                layout.separator()
-                layout.label(text='Gaussian Test Camera Poses')
-                row = layout.row(align=True)
-                row.prop(scene, 'splats_test_dummy', toggle=True, text='Dummy')
-                row.prop(scene, 'splats_test_dummy', toggle=True, text='Full', invert_checkbox=True)
+                layout.prop(scene, 'splats_nb_points')
+
+            layout.prop(scene, 'splats_test_dummy', text='Dummy Test Camera File')
 
             layout.prop(scene, 'gbuffer', text='G-buffer Maps')
 

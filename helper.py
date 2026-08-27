@@ -12,6 +12,7 @@ from . import gbuffer
 
 # global addon script variables
 EMPTY_NAME = 'BlenderNeRF Sphere'
+AABB_EMPTY_NAME = 'BlenderNeRF AABB'
 CAMERA_NAME = 'BlenderNeRF Camera'
 SPIRAL_PATH_NAME = 'BlenderNeRF Spiral Path'
 SPIRAL_TRACK_NAME = 'BlenderNeRF Spiral Track'
@@ -106,6 +107,54 @@ def visualize_camera(self, context):
                 bpy.data.cameras.remove(block)
 
         scene.camera_exists = False
+
+def aabb_empty_half_extent(scene):
+    '''Instant NGP aabb_scale is the cube side length, centered at the world origin.'''
+    return scene.aabb * 0.5
+
+def apply_aabb_empty(scene, empty):
+    empty.empty_display_type = 'CUBE'
+    empty.empty_display_size = aabb_empty_half_extent(scene)
+    empty.location = (0.0, 0.0, 0.0)
+    empty.rotation_euler = (0.0, 0.0, 0.0)
+    empty.scale = (1.0, 1.0, 1.0)
+    empty.hide_render = True
+    empty.show_in_front = True
+    empty.show_name = True
+
+def aabb_empty_needs_sync(scene, empty):
+    half = aabb_empty_half_extent(scene)
+    return (
+        empty.empty_display_type != 'CUBE'
+        or abs(empty.empty_display_size - half) > 1e-6
+        or empty.location.length_squared > 1e-12
+        or abs(empty.rotation_euler[0]) > 1e-6
+        or abs(empty.rotation_euler[1]) > 1e-6
+        or abs(empty.rotation_euler[2]) > 1e-6
+        or abs(empty.scale.x - 1.0) > 1e-6
+        or abs(empty.scale.y - 1.0) > 1e-6
+        or abs(empty.scale.z - 1.0) > 1e-6
+    )
+
+def visualize_aabb(self, context):
+    scene = context.scene
+    empty = bpy.data.objects.get(AABB_EMPTY_NAME)
+    in_scene = empty is not None and AABB_EMPTY_NAME in scene.objects.keys()
+
+    if scene.show_aabb:
+        if empty is None:
+            empty = bpy.data.objects.new(AABB_EMPTY_NAME, None)
+        apply_aabb_empty(scene, empty)
+        if not in_scene:
+            _link_object(scene, empty)
+        view_layer = getattr(context, 'view_layer', None)
+        if view_layer is not None:
+            view_layer.objects.active = empty
+        scene.aabb_exists = True
+    else:
+        if empty is not None:
+            bpy.data.objects.remove(empty, do_unlink=True)
+        scene.aabb_exists = False
 
 def delete_camera(scene, name):
     objects = bpy.data.objects
@@ -299,6 +348,11 @@ def properties_ui(self, context):
         bpy.context.scene.objects[CAMERA_NAME].constraints['Track To'].track_axis = 'TRACK_Z' if scene.outwards else 'TRACK_NEGATIVE_Z'
         upd_on()
 
+    if AABB_EMPTY_NAME in scene.objects.keys():
+        upd_off()
+        apply_aabb_empty(scene, bpy.data.objects[AABB_EMPTY_NAME])
+        upd_on()
+
     camera = scene.camera
     if camera is not None and SPIRAL_TRACK_NAME in camera.constraints:
         upd_off()
@@ -337,6 +391,17 @@ def properties_desgraph(scene):
             if CAMERA_NAME in block.name:
                 bpy.data.cameras.remove(block)
 
+    if scene.show_aabb and AABB_EMPTY_NAME in scene.objects.keys():
+        empty = bpy.data.objects[AABB_EMPTY_NAME]
+        if aabb_empty_needs_sync(scene, empty):
+            upd_off()
+            apply_aabb_empty(scene, empty)
+            upd_on()
+
+    if AABB_EMPTY_NAME not in scene.objects.keys() and scene.aabb_exists:
+        scene.show_aabb = False
+        scene.aabb_exists = False
+
     if CAMERA_NAME in scene.objects.keys():
         scene.objects[CAMERA_NAME].location = sample_from_sphere(scene)
 
@@ -363,8 +428,11 @@ JOB_RUNNING = 1
 JOB_DONE = 2
 JOB_CANCELLED = 3
 
+def wants_test_json(scene):
+    return bool(scene.test_data or scene.splats_test_dummy)
+
 def wants_test_render(scene):
-    return scene.test_data and scene.render_frames and not (scene.splats and scene.splats_test_dummy)
+    return scene.test_data and scene.render_frames and not scene.splats_test_dummy
 
 def wants_any_image_render(scene):
     return bool(scene.render_frames and gbuffer.selected_output_channels(scene))

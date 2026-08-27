@@ -40,7 +40,7 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
         scene.init_frame_step = scene.frame_step
         scene.init_output_path = scene.render.filepath
 
-        if scene.test_data:
+        if helper.wants_test_json(scene):
             # testing transforms
             output_data['frames'] = self.get_camera_extrinsics(scene, camera, mode='TEST', method='SOF')
             self.save_json(output_path, 'transforms_test.json', output_data)
