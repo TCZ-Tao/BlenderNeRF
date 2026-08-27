@@ -127,16 +127,19 @@ class BlenderNeRF_Operator(bpy.types.Operator):
                 if not obj.data.vertex_colors:
                     obj.data.vertex_colors.new(name=TMP_VERTEX_COLORS)
 
-        if bpy.context.object is None or bpy.context.active_object is None:
+        view_layer = bpy.context.view_layer
+        if view_layer.objects.active is None and bpy.data.objects:
             self.report({'INFO'}, 'No object active. Setting first object as active.')
-            bpy.context.view_layer.objects.active = bpy.data.objects[0]
+            view_layer.objects.active = bpy.data.objects[0]
 
-        init_mode = bpy.context.object.mode
-        bpy.ops.object.mode_set(mode='OBJECT')
+        init_active_object = view_layer.objects.active
+        init_mode = init_active_object.mode if init_active_object is not None else 'OBJECT'
+        if init_active_object is not None and init_mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
 
-        init_active_object = bpy.context.active_object
-        init_selected_objects = bpy.context.selected_objects
-        bpy.ops.object.select_all(action='DESELECT')
+        init_selected_objects = list(bpy.context.selected_objects)
+        for obj in scene.objects:
+            obj.select_set(False)
 
         # select only visible meshes
         for obj in scene.objects:
@@ -153,13 +156,15 @@ class BlenderNeRF_Operator(bpy.types.Operator):
                     obj.data.vertex_colors.remove(obj.data.vertex_colors[TMP_VERTEX_COLORS])
 
         bpy.context.view_layer.objects.active = init_active_object
-        bpy.ops.object.select_all(action='DESELECT')
+        for obj in scene.objects:
+            obj.select_set(False)
 
         # reselect previously selected objects
         for obj in init_selected_objects:
             obj.select_set(True)
 
-        bpy.ops.object.mode_set(mode=init_mode)
+        if init_active_object is not None and init_mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode=init_mode)
 
     def save_json(self, directory, filename, data, indent=4):
         filepath = os.path.join(directory, filename)
@@ -306,7 +311,10 @@ class BlenderNeRF_RenderPipeline(bpy.types.Operator):
 
         gbuffer.begin_job(scene, passes)
         try:
-            helper.start_render_pass(scene)
+            if bpy.app.background:
+                helper.run_render_pipeline_sync(scene)
+            else:
+                helper.start_render_pass(scene)
         except Exception as exc:
             self.report({'ERROR'}, str(exc))
             helper.finalize_render(scene)

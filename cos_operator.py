@@ -32,7 +32,7 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
 
         # clean directory name (unsupported characters replaced) and output path
         output_dir = bpy.path.clean_name(scene.cos_dataset_name)
-        output_path = os.path.join(scene.save_path, output_dir)
+        output_path = os.path.join(helper.resolved_save_path(scene), output_dir)
         os.makedirs(output_path, exist_ok=True)
 
         if scene.logs: self.save_log_file(scene, output_path, method='COS')
@@ -81,7 +81,7 @@ class CameraOnSphere(blender_nerf_operator.BlenderNeRF_Operator):
         if needs_train_render or needs_test_render:
             if not any(scene.rendering):
                 scene.rendering = (False, False, True)
-            bpy.ops.object.blendernerf_render_pipeline('INVOKE_DEFAULT', do_train=needs_train_render, do_test=needs_test_render)
+            helper.launch_render_pipeline(needs_train_render, needs_test_render)
             return {'FINISHED'}
 
         if not any(scene.rendering):

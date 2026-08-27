@@ -39,6 +39,59 @@ NeRFs and Gaussian splats can speed up this process, but require camera informat
 Although release versions of **BlenderNeRF** are available for download, they are primarily intended for tracking major code changes and for citation purposes. I recommend downloading the current repository directly, since minor changes or bug fixes might not be included in a release right away.
 
 
+## Headless rendering (Linux server)
+
+Configure the scene in the Blender UI (method, cameras, resolution, G-buffer, samples), pack textures (**File → External Data → Pack Resources**), then save the `.blend`. Copy this add-on to:
+
+```text
+~/.config/blender/<BLENDER_VERSION>/scripts/addons/BlenderNeRF/
+```
+
+`<BLENDER_VERSION>` must match the Blender you run (e.g. `5.2`).
+
+Blender reads arguments **left to right**. The `.blend` must be loaded **before** `--python`, and `--addons BlenderNeRF` is required with `--factory-startup` (factory mode does not enable user add-ons).
+
+| Before `--` | After `--` |
+|---|---|
+| Blender flags, **`--addons BlenderNeRF`**, **`scene.blend`**, `--python cli.py` | `cli.py` flags only: `--method`, `--save-path`, `--cycles-device` |
+
+Example `run_blender.sh`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# SSH/VS Code often sets DISPLAY to a dead X11 session; -b still hangs if it is set.
+unset DISPLAY WAYLAND_DISPLAY
+
+export CUDA_VISIBLE_DEVICES=7          # pick one GPU
+export CUDA_DEVICE_ORDER=PCI_BUS_ID    # indices match nvidia-smi
+
+BLEND="wood chair.blend"
+CLI="$HOME/.config/blender/5.2/scripts/addons/BlenderNeRF/cli.py"
+OUT="$PWD/dining_chair"
+
+blender -b -noaudio --factory-startup --addons BlenderNeRF \
+  "$BLEND" \
+  --python-exit-code 1 \
+  --python "$CLI" -- \
+  --method COS --cycles-device CUDA --save-path "$OUT"
+```
+
+`--method` is `SOF`, `TTC`, or `COS` (must match how the `.blend` was set up). `--cycles-device` accepts `CPU`, `CUDA`, `OPTIX`, `HIP`, `METAL`, or `ONEAPI`.
+
+Check the first log line: `blend='.../wood chair.blend'` and `res=WxH` must match the file. If `blend=''`, the `.blend` was passed after `--` or after `--python`, and you rendered the factory default cube on CPU.
+
+With **G-buffer Maps** enabled, RGB frames are in `train/rgba/` and `test/rgba/`, not in `train/` itself.
+
+Do **not** put `--cycles-device` after `--` *and* forget `--addons BlenderNeRF`. Typical failures:
+
+* Hang right after the version string → `unset DISPLAY WAYLAND_DISPLAY`, add `-noaudio --factory-startup`.
+* `Scene` has no `save_path` → missing `--addons BlenderNeRF`.
+* `unrecognized arguments: foo.blend` → the `.blend` was after `--`; move it before `--python`.
+* CPU-only / wrong resolution / default cube → `.blend` was after `--python`; swap the order as above.
+
+
 ## Setting
 
 **BlenderNeRF** consists of 3 methods discussed in the sub-sections below. Each method is capable of creating **training** data and **testing** data for NeRF in the form of training images and a `transforms_train.json` respectively `transforms_test.json` file with the corresponding camera information. The data is archived into a single **ZIP** file containing training and testing folders. Training data can then be used by a NeRF model to learn the 3D scene representation. Once trained, the model may be evaluated (or tested) on the testing data (camera information only) to obtain novel renders.

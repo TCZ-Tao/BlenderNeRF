@@ -27,18 +27,32 @@ SPIRAL_ELEV_MIN = math.radians(7.125016255700351)
 def poll_is_camera(self, obj):
     return obj.type == 'CAMERA'
 
+def _link_object(scene, obj):
+    '''Link an object without bpy.ops so this works in blender -b.'''
+    coll = getattr(bpy.context, 'collection', None) or scene.collection
+    try:
+        coll.objects.link(obj)
+    except RuntimeError:
+        if obj.name not in scene.collection.objects:
+            scene.collection.objects.link(obj)
+
+
 def visualize_sphere(self, context):
     scene = context.scene
 
     if EMPTY_NAME not in scene.objects.keys() and not scene.sphere_exists:
-        # if empty sphere does not exist, create
-        bpy.ops.object.empty_add(type='SPHERE') # non default location, rotation and scale here are sometimes not applied, so we enforce them manually below
-        empty = context.active_object
-        empty.name = EMPTY_NAME
+        empty = bpy.data.objects.get(EMPTY_NAME)
+        if empty is None:
+            empty = bpy.data.objects.new(EMPTY_NAME, None)
+        empty.empty_display_type = 'SPHERE'
         empty.location = scene.sphere_location
         empty.rotation_euler = scene.sphere_rotation
         empty.scale = scene.sphere_scale
         empty.empty_display_size = scene.sphere_radius
+        _link_object(scene, empty)
+        view_layer = getattr(context, 'view_layer', None)
+        if view_layer is not None:
+            view_layer.objects.active = empty
 
         scene.sphere_exists = True
 
@@ -59,14 +73,24 @@ def visualize_camera(self, context):
         if EMPTY_NAME not in scene.objects.keys():
             scene.show_sphere = True
 
-        bpy.ops.object.camera_add()
-        camera = context.active_object
-        camera.name = CAMERA_NAME
-        camera.data.name = CAMERA_NAME
+        cam_data = bpy.data.cameras.get(CAMERA_NAME)
+        if cam_data is None:
+            cam_data = bpy.data.cameras.new(CAMERA_NAME)
+        camera = bpy.data.objects.get(CAMERA_NAME)
+        if camera is None:
+            camera = bpy.data.objects.new(CAMERA_NAME, cam_data)
+        else:
+            camera.data = cam_data
         camera.location = sample_from_sphere(scene)
-        bpy.data.cameras[CAMERA_NAME].lens = scene.focal
+        cam_data.lens = scene.focal
+        _link_object(scene, camera)
+        view_layer = getattr(context, 'view_layer', None)
+        if view_layer is not None:
+            view_layer.objects.active = camera
 
-        cam_constraint = camera.constraints.new(type='TRACK_TO')
+        cam_constraint = next((c for c in camera.constraints if c.type == 'TRACK_TO'), None)
+        if cam_constraint is None:
+            cam_constraint = camera.constraints.new(type='TRACK_TO')
         cam_constraint.track_axis = 'TRACK_Z' if scene.outwards else 'TRACK_NEGATIVE_Z'
         cam_constraint.up_axis = 'UP_Y'
         cam_constraint.target = bpy.data.objects[EMPTY_NAME]
@@ -450,11 +474,15 @@ def write_scene_metadata(scene, output_path, dataset_name):
     with open(filepath, 'w') as file:
         json.dump(data, file, indent=4)
 
+def resolved_save_path(scene):
+    '''Absolute output directory; DIR_PATH values may be stored as // relative paths.'''
+    return bpy.path.abspath(scene.save_path)
+
 def dataset_output_path(scene):
     dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)
     method_dataset_name = dataset_names[list(scene.rendering).index(True)]
     output_dir = bpy.path.clean_name(method_dataset_name)
-    return os.path.join(scene.save_path, output_dir)
+    return os.path.join(resolved_save_path(scene), output_dir)
 
 def images_output_dir(scene, split, channel):
     base = os.path.join(dataset_output_path(scene), split)
@@ -496,7 +524,7 @@ def _keep_ui_display_type():
 
 def apply_hide_render_view(scene):
     '''Switch Blender to Keep User Interface so the render result window does not open.'''
-    if not getattr(scene, 'hide_render_view', False):
+    if bpy.app.background or not getattr(scene, 'hide_render_view', False):
         return
     view = bpy.context.preferences.view
     if not getattr(scene, 'init_render_display_type', ''):
@@ -516,7 +544,10 @@ def restore_hide_render_view(scene):
 
 
 def invoke_animation_render():
-    '''Start an animation render with a VIEW_3D override when possible.'''
+    '''Start an animation render. Blocking EXEC in blender -b, INVOKE in the UI.'''
+    if bpy.app.background:
+        return bpy.ops.render.render(animation=True, write_still=True)
+
     wm = bpy.context.window_manager
     for window in wm.windows:
         screen = window.screen
@@ -581,16 +612,41 @@ def start_render_pass(scene):
     else:
         configure_train_timeline(scene)
 
+    out_dir = images_output_dir(scene, split, channel)
     print(
         f"[BlenderNeRF] {split}/{channel}  "
         f"frames {scene.frame_start}-{scene.frame_end} step {scene.frame_step}  "
-        f"camera {scene.camera.name if scene.camera else None}"
+        f"camera {scene.camera.name if scene.camera else None}  "
+        f"-> {out_dir}"
     )
-
-    out_dir = images_output_dir(scene, split, channel)
     gbuffer.apply_pass_settings(scene, channel, out_dir)
     apply_hide_render_view(scene)
-    invoke_animation_render()
+    result = invoke_animation_render()
+
+    if bpy.app.background:
+        if result == {'CANCELLED'}:
+            scene.nerf_job_status = JOB_CANCELLED
+        elif scene.nerf_job_status == JOB_RUNNING:
+            scene.nerf_job_status = JOB_DONE
+
+def launch_render_pipeline(do_train, do_test):
+    '''Start the train/test G-buffer pipeline. Blocking under blender -b.'''
+    bpy.ops.object.blendernerf_render_pipeline(do_train=do_train, do_test=do_test)
+
+def run_render_pipeline_sync(scene):
+    '''Run every G-buffer/RGB pass with blocking renders (headless).'''
+    try:
+        while gbuffer.current_pass() is not None:
+            start_render_pass(scene)
+            if scene.nerf_job_status == JOB_CANCELLED:
+                break
+            if not gbuffer.advance_pass():
+                break
+        finalize_render(scene)
+    except Exception:
+        traceback.print_exc()
+        finalize_render(scene)
+        raise
 
 def schedule_next_render_pass():
     global _pipeline_timer_registered
@@ -672,20 +728,23 @@ def finalize_render(scene):
     scene.render.filepath = scene.init_output_path
 
     output_dir = bpy.path.clean_name(method_dataset_name)
-    output_path = os.path.join(scene.save_path, output_dir)
+    output_path = os.path.join(resolved_save_path(scene), output_dir)
     maybe_compress_dataset(scene, output_path)
+    print(f"[BlenderNeRF] done: {output_path}")
 
 @persistent
 def post_render_complete(scene):
     if any(scene.rendering):
         scene.nerf_job_status = JOB_DONE
-        schedule_next_render_pass()
+        if not bpy.app.background:
+            schedule_next_render_pass()
 
 @persistent
 def post_render_cancel(scene):
     if any(scene.rendering) and scene.nerf_job_status == JOB_RUNNING:
         scene.nerf_job_status = JOB_CANCELLED
-        finalize_render(scene)
+        if not bpy.app.background:
+            finalize_render(scene)
 
 # set initial property values (bpy.data and bpy.context require a loaded scene)
 @persistent
@@ -694,11 +753,16 @@ def set_init_props(scene):
     filename = bpy.path.basename(filepath)
     default_save_path = filepath[:-len(filename)] # remove file name from blender file path = directoy path
 
-    scene.save_path = default_save_path
+    # In blender -b the CLI (or the .blend) may already have set save_path.
+    # Overwriting here sent images next to the .blend while JSON went to --save-path.
+    if not bpy.app.background or not (scene.save_path or '').strip():
+        scene.save_path = default_save_path
     scene.init_frame_step = scene.frame_step
     scene.init_output_path = scene.render.filepath
 
-    bpy.app.handlers.depsgraph_update_post.remove(set_init_props)
+    handlers = bpy.app.handlers.depsgraph_update_post
+    while set_init_props in handlers:
+        handlers.remove(set_init_props)
 
 # update cos camera when changing frame
 @persistent
