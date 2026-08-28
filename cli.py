@@ -7,6 +7,11 @@ pass --addons BlenderNeRF when using --factory-startup.
     blender -b -noaudio --factory-startup --addons BlenderNeRF \\
       scene.blend --python-exit-code 1 --python cli.py -- \\
       --method COS --cycles-device CUDA --save-path /data/out
+
+    blender -b -noaudio --factory-startup --addons BlenderNeRF \\
+      scene.blend --python-exit-code 1 --python cli.py -- \\
+      --mode relight --method COS --envmap /data/hdris/bridge.hdr \\
+      --cycles-device CUDA --save-path /data/out --name lego
 """
 
 from __future__ import annotations
@@ -140,14 +145,18 @@ def parse_args(argv):
         description='Export a BlenderNeRF dataset in background mode (blender -b).',
         epilog='Put scene.blend BEFORE --. Only script flags go after --.',
     )
+    parser.add_argument('--mode', choices=('export', 'relight'), default='export',
+                        help='export writes the dataset (default); relight swaps a World HDRI and renders test views')
     parser.add_argument('--method', choices=sorted(OPERATORS), required=True,
                         help='SOF, TTC, or COS (must match how the .blend was set up)')
     parser.add_argument('--save-path', default='',
                         help='Output directory (overrides the path stored in the .blend)')
     parser.add_argument('--name', default='',
-                        help='Dataset folder name (overrides the method Name field)')
+                        help='Dataset folder name (overrides the method Name field; no SOF/TTC/COS prefix)')
+    parser.add_argument('--envmap', default='',
+                        help='HDRI file used as World lighting (--mode relight)')
     parser.add_argument('--no-render', action='store_true',
-                        help='Write transforms/JSON only, skip image renders')
+                        help='Write transforms/JSON only, skip image renders (export mode)')
     parser.add_argument('--engine', default='',
                         help='Render engine override, e.g. CYCLES')
     parser.add_argument('--cycles-device', default='',
@@ -163,7 +172,27 @@ def parse_args(argv):
         )
     if unknown:
         parser.error(f'unrecognized arguments: {" ".join(unknown)}')
+    if args.mode == 'relight':
+        if not (args.envmap or '').strip():
+            parser.error('--mode relight requires --envmap PATH')
+        if args.no_render:
+            parser.error('--no-render cannot be used with --mode relight')
+    elif args.envmap:
+        parser.error('--envmap requires --mode relight')
     return args
+
+
+def _has_images(directory):
+    if not os.path.isdir(directory):
+        return False
+    for root, _dirs, files in os.walk(directory):
+        if any(f.lower().endswith(('.png', '.jpg', '.jpeg', '.exr', '.tif', '.tiff')) for f in files):
+            return True
+    return False
+
+
+def _envmap_stem(filepath):
+    return bpy.path.clean_name(os.path.splitext(os.path.basename(filepath))[0])
 
 
 def main():
@@ -222,6 +251,15 @@ def main():
     if args.cycles_device:
         apply_cycles_device(args.cycles_device)
 
+    envmap = ''
+    if args.mode == 'relight':
+        envmap = os.path.abspath(os.path.expanduser(args.envmap))
+        if not os.path.isfile(envmap):
+            print(f'ERROR: environment map file not found: {envmap}', file=sys.stderr)
+            return 1
+        scene.relight_method = args.method
+        scene.relight_envmap = envmap
+
     save_path = bpy.path.abspath(scene.save_path)
     if not save_path:
         print('ERROR: save path is empty. Pass --save-path.', file=sys.stderr)
@@ -239,17 +277,35 @@ def main():
     save_path = bpy.path.abspath(scene.save_path)
     scene.save_path = save_path
 
+    dataset_name = _dataset_name(scene, args.method)
     print(
-        f'[BlenderNeRF] method={args.method} save_path={save_path} '
-        f'name={_dataset_name(scene, args.method)!r} '
+        f'[BlenderNeRF] mode={args.mode} method={args.method} save_path={save_path} '
+        f'name={dataset_name!r} '
         f'render_frames={bool(scene.render_frames)} engine={scene.render.engine} '
         f'background={bool(bpy.app.background)}'
+        + (f' envmap={envmap!r}' if envmap else '')
     )
+
+    if args.mode == 'relight':
+        try:
+            result = bpy.ops.object.blendernerf_relight()
+        except RuntimeError as exc:
+            print(f'ERROR: relight failed: {exc}', file=sys.stderr)
+            return 1
+        print(f'[BlenderNeRF] operator result={result}')
+
+        output_dir = bpy.path.clean_name(dataset_name)
+        actual_save = bpy.path.abspath(scene.save_path)
+        relight_dir = os.path.join(actual_save, output_dir, 'test_rli', _envmap_stem(envmap))
+        if not _has_images(relight_dir):
+            print(f'ERROR: no relight images written to {relight_dir}', file=sys.stderr)
+            return 1
+        return 0
 
     result = _call_operator(args.method)
     print(f'[BlenderNeRF] operator result={result}')
 
-    output_dir = bpy.path.clean_name(_dataset_name(scene, args.method))
+    output_dir = bpy.path.clean_name(dataset_name)
     actual_save = bpy.path.abspath(scene.save_path)
     output_path = os.path.join(actual_save, output_dir)
     zip_path = output_path + '.zip'
@@ -270,12 +326,7 @@ def main():
         return 1
 
     if scene.render_frames and not scene.compress_to_zip:
-        has_img = False
-        for root, _dirs, files in os.walk(output_path):
-            if any(f.lower().endswith(('.png', '.jpg', '.jpeg', '.exr', '.tif', '.tiff')) for f in files):
-                has_img = True
-                break
-        if not has_img:
+        if not _has_images(output_path):
             print(f'WARNING: no rendered images found under {output_path}', file=sys.stderr)
             print('G-buffer images are in train/rgba, train/albedo, ... not in train/ itself.', file=sys.stderr)
 

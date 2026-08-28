@@ -313,6 +313,100 @@ class BlenderNeRF_Operator(bpy.types.Operator):
         self.save_json(directory, filename='log.txt', data=logdata)
 
 
+class BlenderNeRF_Relight(BlenderNeRF_Operator):
+    '''Swap the World environment map and render test-camera frames into test_rli.'''
+    bl_idname = 'object.blendernerf_relight'
+    bl_label = 'Render Relight'
+    bl_description = 'Use the selected HDRI as World lighting and render the method test-camera sequence into test_rli/<envmap>/'
+
+    def relight_error_messages(self, scene, method):
+        error_messages = []
+        envmap = (scene.relight_envmap or '').strip()
+        if not envmap:
+            error_messages.append('Environment map path cannot be empty!')
+        else:
+            path = helper.resolved_envmap_path(envmap)
+            if not os.path.isfile(path):
+                error_messages.append(f'Environment map file not found: {path}')
+
+        if scene.save_path == '':
+            error_messages.append('Save path cannot be empty!')
+
+        if helper.method_dataset_name(scene, method) == '':
+            error_messages.append('Dataset name cannot be empty!')
+
+        if method == 'TTC':
+            test_camera = scene.camera_test_target
+            if test_camera is None:
+                error_messages.append('Be sure to have selected a test camera!')
+            elif test_camera.data.type != 'PERSP':
+                error_messages.append('Only perspective cameras are supported!')
+        else:
+            camera = scene.camera
+            if camera is None:
+                error_messages.append('Be sure to have a selected camera!')
+            elif camera.data.type != 'PERSP':
+                error_messages.append('Only perspective cameras are supported!')
+
+        return error_messages
+
+    def execute(self, context):
+        scene = context.scene
+        method = scene.relight_method
+
+        if scene.relight_active or any(scene.rendering):
+            self.report({'ERROR'}, 'A BlenderNeRF render is already running!')
+            return {'CANCELLED'}
+
+        error_messages = self.relight_error_messages(scene, method)
+        if error_messages:
+            self.report({'ERROR'}, error_messages[0])
+            return {'CANCELLED'}
+
+        envmap = helper.resolved_envmap_path(scene.relight_envmap)
+        out_dir = helper.relight_output_dir(scene, envmap, method)
+        os.makedirs(out_dir, exist_ok=True)
+
+        scene.init_output_path = scene.render.filepath
+        scene.init_frame_step = scene.frame_step
+        scene.init_frame_end = scene.frame_end
+        if scene.camera is not None:
+            scene.init_active_camera = scene.camera
+            scene.init_active_camera_name = scene.camera.name
+
+        try:
+            helper.apply_world_envmap(scene, envmap)
+        except Exception as exc:
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+
+        scene.rendering = helper.rendering_flags_for_method(method)
+        scene.relight_active = True
+        scene.render.filepath = os.path.join(out_dir, '')
+
+        try:
+            result = helper.start_relight_render(scene, out_dir)
+        except Exception as exc:
+            helper.finalize_relight(scene)
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+
+        if bpy.app.background:
+            cancelled = result == {'CANCELLED'} or scene.nerf_job_status == helper.JOB_CANCELLED
+            helper.finalize_relight(scene)
+            if cancelled:
+                self.report({'ERROR'}, 'Relight render was cancelled')
+                return {'CANCELLED'}
+            return {'FINISHED'}
+
+        if result == {'CANCELLED'}:
+            helper.finalize_relight(scene)
+            self.report({'ERROR'}, 'Could not start relight render')
+            return {'CANCELLED'}
+
+        return {'FINISHED'}
+
+
 class BlenderNeRF_RenderPipeline(bpy.types.Operator):
     '''Train-then-test (and G-buffer) render pipeline.'''
     bl_idname = 'object.blendernerf_render_pipeline'

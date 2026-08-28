@@ -111,6 +111,7 @@ Notice that each method has its distinctive `Name` property (by default set to `
   transforms_test.json
   train/                     # RGB when G-buffer is off
   test/
+  test_rli/<envmap>/         # Relight Mode RGB (folder name = HDRI filename without extension)
   points3d.ply               # if Gaussian Points
   log.txt                    # if Save Log File
   material_id.json           # if Material ID / Material ID Viz
@@ -188,6 +189,30 @@ When `G-buffer Maps` is on, PLAY SOF / TTC / COS runs an extra unlit pass per se
 If Material ID or Material ID Viz is selected, a `material_id.json` mapping (`id`, material `name`, `viz_color`) is written at the dataset root.
 
 
+## Relight Mode
+
+Relight Mode renders **test-camera** frames under a different World HDRI for inverse-rendering / relighting GT. It does **not** re-export transforms, G-buffer maps, or train views, and it does **not** zip the dataset.
+
+In the shared panel, enable `Relight Mode`:
+
+* `Method` : which test-camera timeline to use (`SOF` / `TTC` / `COS`). Output uses that method's **Name** field as-is (no `SOF_` / `COS_` prefix). Only one method runs per job.
+* `Environment Map` : path to a single HDRI (`.hdr`, `.exr`, …)
+* `Render Relight` : swap the World Environment Texture to that file (scene lamps and Film Transparent stay unchanged), render the test sequence, write RGB into `<save path>/<name>/test_rli/<envmap>/`, then restore the original World
+
+Frame names follow the scene render output (`frame_path`), same as `test/`.
+
+Headless example:
+
+```bash
+blender -b -noaudio --factory-startup --addons BlenderNeRF \
+  scene.blend --python-exit-code 1 --python cli.py -- \
+  --mode relight --method COS --envmap /data/hdris/bridge.hdr \
+  --cycles-device CUDA --save-path /data/out --name lego
+```
+
+That writes `/data/out/lego/test_rli/bridge/`. `--name` overrides the method Name field; it is not prefixed with the method id.
+
+
 ## Tips for Optimal Results
 
 NVIDIA provides a few helpful tips on how to train a NeRF model using [Instant NGP](https://github.com/NVlabs/instant-ngp/blob/master/docs/nerf_dataset_tips.md). Feel free to visit their repository for further help. Below are some quick tips for optimal **nerfing** gained from personal experience.
@@ -262,9 +287,11 @@ blender -b -noaudio --factory-startup --addons BlenderNeRF \
 
 Optional `cli.py` flags:
 
+* `--mode` : `export` (default dataset write) or `relight` (test views under a new HDRI)
 * `--save-path` : override the **Save Path** stored in the `.blend`
-* `--name` : override the method **Name** (dataset folder name)
-* `--no-render` : write transforms / JSON only, skip image renders
+* `--name` : override the method **Name** (dataset folder name; not prefixed with SOF/TTC/COS)
+* `--envmap` : HDRI file; required with `--mode relight`
+* `--no-render` : write transforms / JSON only, skip image renders (`export` mode)
 * `--engine` : render engine override, e.g. `CYCLES`
 * `--cycles-device` : Cycles compute device (see above)
 

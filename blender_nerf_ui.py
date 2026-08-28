@@ -66,3 +66,16 @@ class BlenderNeRF_UI(bpy.types.Panel):
             layout.use_property_split = True
             layout.prop(scene, 'save_path')
             layout.prop(scene, 'compress_to_zip')
+
+        layout.separator()
+        layout.use_property_split = False
+        layout.prop(scene, 'relight_mode', toggle=True, text='Relight Mode')
+
+        if scene.relight_mode:
+            box = layout.box()
+            box.use_property_split = True
+            box.prop(scene, 'relight_method')
+            box.prop(scene, 'relight_envmap')
+            if not (scene.train_data or scene.test_data or scene.splats_test_dummy):
+                box.prop(scene, 'save_path')
+            box.operator('object.blendernerf_relight', text='Render Relight')

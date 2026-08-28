@@ -61,12 +61,25 @@ PROPS = [
     ('nerf', bpy.props.BoolProperty(name='NeRF', description='Whether to export the camera transforms.json files in the defaut NeRF file format convention', default=False) ),
     ('save_path', bpy.props.StringProperty(name='Save Path', description='Path to the output directory in which the synthetic dataset will be stored', subtype='DIR_PATH') ),
     ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIP', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),
+    ('relight_mode', bpy.props.BoolProperty(name='Relight Mode', description='Show relighting controls: swap a World HDRI and render test-camera frames into test_rli', default=False) ),
+    ('relight_method', bpy.props.EnumProperty(
+        name='Method',
+        description='Which method test-camera timeline to use. Output goes under <save path>/<Name>/test_rli, using that method Name field with no SOF/TTC/COS prefix',
+        items=(
+            ('SOF', 'SOF', 'Subset of Frames test camera and timeline'),
+            ('TTC', 'TTC', 'Train and Test Cameras test camera and timeline'),
+            ('COS', 'COS', 'Camera on Sphere test camera and Test Frames'),
+        ),
+        default='COS',
+    ) ),
+    ('relight_envmap', bpy.props.StringProperty(name='Environment Map', description='HDRI / environment image used as World lighting for relight renders', subtype='FILE_PATH') ),
 
     # global automatic properties
     ('init_frame_step', bpy.props.IntProperty(name='Initial Frame Step') ),
     ('init_output_path', bpy.props.StringProperty(name='Initial Output Path', subtype='DIR_PATH') ),
     ('init_render_display_type', bpy.props.StringProperty(name='Initial Render Display Type', default='') ),
     ('rendering', bpy.props.BoolVectorProperty(name='Rendering', description='Whether one of the SOF, TTC or COS methods is rendering', default=(False, False, False), size=3) ),
+    ('relight_active', bpy.props.BoolProperty(name='Relight Active', description='Whether a relight render is in progress', default=False) ),
     ('nerf_job_status', bpy.props.IntProperty(name='NeRF Job Status', description='0 idle, 1 running, 2 done, 3 cancelled', default=0) ),
     ('blendernerf_version', bpy.props.StringProperty(name='BlenderNeRF Version', default=VERSION) ),
     ('aabb_exists', bpy.props.BoolProperty(name='AABB Exists', description='Whether the AABB visualization empty exists', default=False) ),
@@ -116,7 +129,8 @@ CLASSES = [
     ttc_operator.TrainTestCameras,
     cos_operator.CameraOnSphere,
     cos_operator.ApplySphericalSpiral,
-    blender_nerf_operator.BlenderNeRF_RenderPipeline
+    blender_nerf_operator.BlenderNeRF_RenderPipeline,
+    blender_nerf_operator.BlenderNeRF_Relight,
 ]
 
 # load addon

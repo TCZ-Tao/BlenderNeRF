@@ -482,19 +482,16 @@ def _find_background_node(node_tree):
 
     return next((n for n in node_tree.nodes if n.type == 'BACKGROUND'), None)
 
-def world_envmap_info(scene):
-    '''Return (envmap filename, background strength) from the World shader.'''
-    envmap = ''
-    envmap_inten = 1.0
-    world = scene.world
-    if world is None:
-        return envmap, envmap_inten
-
-    if not (world.use_nodes and world.node_tree):
-        return envmap, envmap_inten
+def _world_env_nodes(world, require_image=True):
+    '''Return (Environment Texture node, Background node) from a World shader.'''
+    if world is None or not (world.use_nodes and world.node_tree):
+        return None, None
 
     node_tree = world.node_tree
-    env_texes = [n for n in node_tree.nodes if n.type == 'TEX_ENVIRONMENT' and n.image]
+    env_texes = [
+        n for n in node_tree.nodes
+        if n.type == 'TEX_ENVIRONMENT' and (n.image or not require_image)
+    ]
     env_tex = None
     background = None
     for candidate in env_texes:
@@ -507,13 +504,174 @@ def world_envmap_info(scene):
         env_tex = env_texes[0]
     if background is None:
         background = _find_background_node(node_tree)
+    return env_tex, background
 
-    if env_tex is not None:
+
+def world_envmap_info(scene):
+    '''Return (envmap filename, background strength) from the World shader.'''
+    envmap = ''
+    envmap_inten = 1.0
+    env_tex, background = _world_env_nodes(scene.world, require_image=True)
+
+    if env_tex is not None and env_tex.image:
         envmap = _image_filename(env_tex.image)
     if background is not None:
         envmap_inten = float(background.inputs['Strength'].default_value)
 
     return envmap, envmap_inten
+
+
+_relight_world_state = None
+
+
+def resolved_envmap_path(filepath):
+    '''Absolute path for a World HDRI; DIR/FILE_PATH values may be stored as // relative paths.'''
+    return os.path.abspath(os.path.expanduser(bpy.path.abspath(filepath)))
+
+
+def envmap_stem(filepath):
+    '''Folder name for test_rli/<stem>/ : filename without extension, cleaned.'''
+    return bpy.path.clean_name(os.path.splitext(os.path.basename(filepath))[0])
+
+
+def method_dataset_name(scene, method):
+    '''Dataset folder name for a method. The Name field as-is — no SOF/TTC/COS prefix.'''
+    if method == 'SOF':
+        return scene.sof_dataset_name
+    if method == 'TTC':
+        return scene.ttc_dataset_name
+    return scene.cos_dataset_name
+
+
+def rendering_flags_for_method(method):
+    if method == 'SOF':
+        return (True, False, False)
+    if method == 'TTC':
+        return (False, True, False)
+    return (False, False, True)
+
+
+def relight_output_dir(scene, envmap_path, method=None):
+    '''<save_path>/<dataset_name>/test_rli/<envmap_stem> — dataset_name is the method Name field.'''
+    method = method or scene.relight_method
+    name = bpy.path.clean_name(method_dataset_name(scene, method))
+    stem = envmap_stem(envmap_path)
+    return os.path.join(resolved_save_path(scene), name, 'test_rli', stem)
+
+
+def apply_world_envmap(scene, filepath):
+    '''Point the World Environment Texture at filepath. Scene lights and Film are left alone.'''
+    global _relight_world_state
+    restore_world_envmap(scene)
+
+    filepath = resolved_envmap_path(filepath)
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f'Environment map file not found: {filepath}')
+
+    prev_scene_world = scene.world
+    created_world = False
+    world = scene.world
+    if world is None:
+        world = bpy.data.worlds.new('BlenderNeRF World')
+        scene.world = world
+        created_world = True
+
+    prev_use_nodes = bool(world.use_nodes)
+    world.use_nodes = True
+    node_tree = world.node_tree
+
+    env_tex, background = _world_env_nodes(world, require_image=False)
+    created_env_tex = False
+    created_background = False
+    created_output = False
+
+    output = next((n for n in node_tree.nodes if n.type == 'OUTPUT_WORLD' and getattr(n, 'is_active_output', True)), None)
+    if output is None:
+        output = next((n for n in node_tree.nodes if n.type == 'OUTPUT_WORLD'), None)
+    if output is None:
+        output = node_tree.nodes.new('ShaderNodeOutputWorld')
+        created_output = True
+
+    if background is None:
+        background = node_tree.nodes.new('ShaderNodeBackground')
+        created_background = True
+        if 'Surface' in output.inputs:
+            node_tree.links.new(background.outputs['Background'], output.inputs['Surface'])
+
+    if env_tex is None:
+        env_tex = node_tree.nodes.new('ShaderNodeTexEnvironment')
+        created_env_tex = True
+        if 'Color' in background.inputs:
+            node_tree.links.new(env_tex.outputs['Color'], background.inputs['Color'])
+    elif background is not None and 'Color' in background.inputs and not env_tex.outputs['Color'].is_linked:
+        node_tree.links.new(env_tex.outputs['Color'], background.inputs['Color'])
+
+    prev_image = env_tex.image
+    env_tex.image = bpy.data.images.load(filepath, check_existing=True)
+
+    _relight_world_state = {
+        'prev_scene_world': prev_scene_world,
+        'created_world': created_world,
+        'world': world,
+        'prev_use_nodes': prev_use_nodes,
+        'env_tex': env_tex,
+        'prev_image': prev_image,
+        'created_env_tex': created_env_tex,
+        'created_background': created_background,
+        'created_output': created_output,
+        'background': background,
+        'output': output,
+    }
+    return filepath
+
+
+def restore_world_envmap(scene):
+    '''Undo apply_world_envmap. Safe to call when no swap is pending.'''
+    global _relight_world_state
+    state = _relight_world_state
+    _relight_world_state = None
+    if not state:
+        return
+
+    env_tex = state.get('env_tex')
+    world = state.get('world')
+    node_tree = world.node_tree if world is not None and getattr(world, 'node_tree', None) else None
+
+    if env_tex is not None:
+        try:
+            env_tex.image = state.get('prev_image')
+        except (ReferenceError, RuntimeError):
+            env_tex = None
+
+    if node_tree is not None:
+        if state.get('created_env_tex') and env_tex is not None:
+            try:
+                node_tree.nodes.remove(env_tex)
+            except (ReferenceError, RuntimeError):
+                pass
+        if state.get('created_background') and state.get('background') is not None:
+            try:
+                node_tree.nodes.remove(state['background'])
+            except (ReferenceError, RuntimeError):
+                pass
+        if state.get('created_output') and state.get('output') is not None:
+            try:
+                node_tree.nodes.remove(state['output'])
+            except (ReferenceError, RuntimeError):
+                pass
+
+    if state.get('created_world'):
+        scene.world = state.get('prev_scene_world')
+        if world is not None:
+            try:
+                bpy.data.worlds.remove(world)
+            except (ReferenceError, RuntimeError):
+                pass
+    elif world is not None:
+        try:
+            world.use_nodes = state.get('prev_use_nodes', True)
+        except (ReferenceError, RuntimeError):
+            pass
 
 def render_spp(scene):
     engine = scene.render.engine
@@ -548,9 +706,8 @@ def resolved_save_path(scene):
 
 def dataset_output_path(scene):
     dataset_names = (scene.sof_dataset_name, scene.ttc_dataset_name, scene.cos_dataset_name)
-    method_dataset_name = dataset_names[list(scene.rendering).index(True)]
-    output_dir = bpy.path.clean_name(method_dataset_name)
-    return os.path.join(resolved_save_path(scene), output_dir)
+    name = dataset_names[list(scene.rendering).index(True)]
+    return os.path.join(resolved_save_path(scene), bpy.path.clean_name(name))
 
 def images_output_dir(scene, split, channel):
     base = os.path.join(dataset_output_path(scene), split)
@@ -732,6 +889,9 @@ def _continue_render_pipeline():
 
     _pipeline_timer_registered = False
 
+    if getattr(scene, 'relight_active', False):
+        return None
+
     if not any(scene.rendering):
         return None
 
@@ -761,7 +921,55 @@ def begin_test_render(scene):
     scene.render.filepath = os.path.join(output_test, '')
     invoke_animation_render()
 
+def start_relight_render(scene, out_dir):
+    '''Configure the test-camera timeline and invoke a single RGB animation render.'''
+    scene.nerf_job_status = JOB_RUNNING
+    configure_test_timeline(scene)
+    print(
+        f"[BlenderNeRF] relight/{scene.relight_method}  "
+        f"frames {scene.frame_start}-{scene.frame_end} step {scene.frame_step}  "
+        f"camera {scene.camera.name if scene.camera else None}  "
+        f"-> {out_dir}"
+    )
+    apply_hide_render_view(scene)
+    result = invoke_animation_render()
+
+    if bpy.app.background:
+        if result == {'CANCELLED'}:
+            scene.nerf_job_status = JOB_CANCELLED
+        elif scene.nerf_job_status == JOB_RUNNING:
+            scene.nerf_job_status = JOB_DONE
+    return result
+
+def finalize_relight(scene):
+    '''Restore World HDRI, camera, and timeline after a relight render. Does not zip.'''
+    restore_world_envmap(scene)
+    restore_hide_render_view(scene)
+
+    if not getattr(scene, 'relight_active', False) and not any(scene.rendering):
+        scene.nerf_job_status = JOB_IDLE
+        return
+
+    if scene.rendering[0]:
+        scene.frame_step = scene.init_frame_step
+
+    if scene.rendering[1] or scene.rendering[2]:
+        scene.frame_end = scene.init_frame_end
+
+    restore_user_camera(scene)
+
+    out_dir = scene.render.filepath
+    scene.rendering = (False, False, False)
+    scene.relight_active = False
+    scene.nerf_job_status = JOB_IDLE
+    scene.render.filepath = scene.init_output_path
+    print(f"[BlenderNeRF] relight done: {out_dir}")
+
 def finalize_render(scene):
+    if getattr(scene, 'relight_active', False):
+        finalize_relight(scene)
+        return
+
     gbuffer.end_job(scene)
     restore_hide_render_view(scene)
 
@@ -802,6 +1010,12 @@ def finalize_render(scene):
 
 @persistent
 def post_render_complete(scene):
+    if getattr(scene, 'relight_active', False):
+        scene.nerf_job_status = JOB_DONE
+        if not bpy.app.background:
+            finalize_relight(scene)
+        return
+
     if any(scene.rendering):
         scene.nerf_job_status = JOB_DONE
         if not bpy.app.background:
@@ -809,6 +1023,12 @@ def post_render_complete(scene):
 
 @persistent
 def post_render_cancel(scene):
+    if getattr(scene, 'relight_active', False):
+        scene.nerf_job_status = JOB_CANCELLED
+        if not bpy.app.background:
+            finalize_relight(scene)
+        return
+
     if any(scene.rendering) and scene.nerf_job_status == JOB_RUNNING:
         scene.nerf_job_status = JOB_CANCELLED
         if not bpy.app.background:
