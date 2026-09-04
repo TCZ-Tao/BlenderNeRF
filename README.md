@@ -86,13 +86,15 @@ The add-on properties panel is available under `3D View > N panel > BlenderNeRF`
 * `Save Log File` (deactivated by default) : whether to save a log file containing reproducibility information on the **BlenderNeRF** run
 * `File Format` (**NGP** by default) : whether to export the camera files in the Instant NGP or defaut NeRF file format convention
 * `Gaussian Points` (deactivated by default) : whether to export a `points3d.ply` file for Gaussian Splatting
-* `Points` (by default set to **100000**) : number of random initialization points sampled uniformly in the scene AABB (only with `Gaussian Points`)
+* `Sample` (**Volume AABB** by default) : how to place those points. `Volume AABB` draws uniformly at random inside the scene AABB; `Surface` samples mesh surfaces with Poisson-disk filtering. Only with `Gaussian Points`
+* `Points` (by default set to **100000**) : number of Gaussian initialization points. Exact for `Volume AABB`; a Poisson target (approximately) for `Surface`. Only with `Gaussian Points`
+* `Cull Occluded Faces` (activated by default) : with `Surface`, drop contact faces and points inside other meshes. Turn off if a large floor/wall disappears (its triangle centroid can sit under another object)
 * `Dummy Test Camera File` (deactivated by default) : write an empty `transforms_test.json` and skip test-image rendering, even if `Test` is on
 * `G-buffer Maps` (deactivated by default) : whether to render extra unlit maps into per-channel folders (see [G-buffer Maps](#g-buffer-maps))
 * `Save Path` (empty by default) : path to the output directory in which the dataset will be created
 * `Compress to ZIP` (deactivated by default) : archive the dataset as a ZIP and delete the uncompressed folder. Leave off to keep files under `<save path>/<name>`
 
-If the `Gaussian Points` property is active, **BlenderNeRF** writes a `points3d.ply` of uniformly random points inside the world-space AABB of all render-visible meshes (modifiers included). This matches the 3D Gaussian Splatting initialization used for NeRF synthetic datasets (default 100000 points, random SH0 colors, zero normals). It does **not** use mesh vertices, and it does **not** use the `iNGP AABB` panel value.
+If the `Gaussian Points` property is active, **BlenderNeRF** writes a `points3d.ply` for 3D Gaussian Splatting initialization (random SH0 colors, zero normals). `Volume AABB` (default) samples uniformly at random inside the world-space AABB of all render-visible meshes (modifiers included). This matches the NeRF synthetic 3DGS init (default 100000 points). It does **not** use mesh vertices, and it does **not** use the `iNGP AABB` panel value. `Surface` instead samples positions on those meshes: evaluated triangles (including Geometry Nodes / collection instances), optional contact-face culling between parts, area-uniform candidates, then Poisson-disk filtering toward `Points`. The PLY format is unchanged.
 
 The [**Gaussian Splatting**](https://github.com/graphdeco-inria/gaussian-splatting) repository natively supports **NeRF** datasets, but requires both train and test data. `Dummy Test Camera File` writes an empty `transforms_test.json` (`frames: []`) so that loader can run without real test views, and skips test-image rendering even when `Test` is on. Leave it off to export the full test camera poses; with `Test` and `Render Frames` on, the `test` folder is rendered in the same run.
 

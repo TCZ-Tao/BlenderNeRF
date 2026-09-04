@@ -2,12 +2,13 @@ import bpy
 
 # Reload Scripts (F3) re-imports this file; without importlib.reload, Python
 # keeps cached submodules, so UI/operator edits never show up.
-from . import gbuffer, helper, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
+from . import gbuffer, helper, splats, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
 
 if 'bpy' in locals():
     import importlib
     importlib.reload(gbuffer)
     importlib.reload(helper)
+    importlib.reload(splats)
     importlib.reload(blender_nerf_operator)
     importlib.reload(blender_nerf_ui)
     importlib.reload(sof_ui)
@@ -45,8 +46,18 @@ PROPS = [
     ('render_frames', bpy.props.BoolProperty(name='Render Frames', description='Whether train/test frames should be rendered. If not selected, only the transforms.json files will be generated', default=True) ),
     ('hide_render_view', bpy.props.BoolProperty(name='Hide Render View', description='Keep the current workspace instead of opening the render result window', default=False) ),
     ('logs', bpy.props.BoolProperty(name='Save Log File', description='Whether to create a log file containing information on the BlenderNeRF run', default=False) ),
-    ('splats', bpy.props.BoolProperty(name='Gaussian Points', description='Whether to export a points3d.ply file of random points in the scene AABB for Gaussian Splatting', default=False) ),
-    ('splats_nb_points', bpy.props.IntProperty(name='Points', description='Number of random Gaussian initialization points sampled uniformly in the scene AABB (visible mesh bounds)', default=100000, min=1, soft_max=1000000) ),
+    ('splats', bpy.props.BoolProperty(name='Gaussian Points', description='Whether to export a points3d.ply file of Gaussian Splatting initialization points', default=False) ),
+    ('splats_sample_mode', bpy.props.EnumProperty(
+        name='Sample',
+        description='How to sample Gaussian initialization points for points3d.ply',
+        items=(
+            ('AABB', 'Volume AABB', 'Uniform random points inside the world-space AABB of render-visible meshes'),
+            ('SURFACE', 'Surface', 'Area-uniform samples on mesh surfaces with Poisson-disk filtering'),
+        ),
+        default='AABB',
+    ) ),
+    ('splats_nb_points', bpy.props.IntProperty(name='Points', description='Number of Gaussian initialization points. Volume AABB samples this count uniformly in the scene AABB; Surface uses it as the Poisson target (approximately)', default=100000, min=1, soft_max=1000000) ),
+    ('splats_cull_occluded', bpy.props.BoolProperty(name='Cull Occluded Faces', description='Drop contact faces and points inside other meshes. Large floor triangles can be removed if their centroid sits under another object; turn this off to keep the full surface', default=True) ),
     ('splats_test_dummy', bpy.props.BoolProperty(name='Dummy Test Camera File', description='Write an empty transforms_test.json and skip test-image rendering, even if Test is on', default=False) ),
     ('gbuffer', bpy.props.BoolProperty(name='G-buffer Maps', description='Whether to render extra unlit G-buffer maps (albedo, roughness, normals, depth, material ID) into per-channel folders', default=False) ),
     ('gbuffer_rgba', bpy.props.BoolProperty(name='RGBA', description='Render the original RGB(A) frames into the rgba folder', default=True) ),

@@ -3,17 +3,14 @@ import math
 import json
 import datetime
 import mathutils
-import numpy as np
 import bpy
-from . import helper, gbuffer
+from . import helper, gbuffer, splats
 
 
 # global addon script variables
 OUTPUT_TRAIN = 'train'
 OUTPUT_TEST = 'test'
 CAMERA_NAME = 'BlenderNeRF Camera'
-# 3DGS SH0 coefficient used when converting random harmonics to RGB
-SPLATS_SH_C0 = 0.28209479177387814
 
 
 # blender nerf operator parent class
@@ -150,37 +147,13 @@ class BlenderNeRF_Operator(bpy.types.Operator):
         return mins, maxs
 
     def save_splats_ply(self, scene, directory):
-        '''Random point cloud in the scene AABB, matching 3DGS NeRF-synthetic init.'''
-        mins, maxs = self.visible_meshes_world_aabb(scene)
-        if mins is None:
-            raise RuntimeError('Gaussian Points requires at least one visible mesh to compute the scene AABB.')
-
-        n = scene.splats_nb_points
-        lo = np.array(mins, dtype=np.float64)
-        hi = np.array(maxs, dtype=np.float64)
-        rng = np.random.default_rng(scene.seed)
-        xyz = rng.random((n, 3)) * (hi - lo) + lo
-        shs = rng.random((n, 3)) / 255.0
-        rgb = np.clip(shs * SPLATS_SH_C0 + 0.5, 0.0, 1.0) * 255.0
-        rgb = np.rint(rgb).astype(np.uint8)
-        normals = np.zeros((n, 3), dtype=np.float64)
-
-        filepath = os.path.join(directory, 'points3d.ply')
-        with open(filepath, 'w', encoding='ascii', newline='\n') as file:
-            file.write('ply\n')
-            file.write('format ascii 1.0\n')
-            file.write(f'element vertex {n}\n')
-            file.write('property float x\n')
-            file.write('property float y\n')
-            file.write('property float z\n')
-            file.write('property float nx\n')
-            file.write('property float ny\n')
-            file.write('property float nz\n')
-            file.write('property uchar red\n')
-            file.write('property uchar green\n')
-            file.write('property uchar blue\n')
-            file.write('end_header\n')
-            np.savetxt(file, np.column_stack((xyz, normals, rgb)), fmt='%.6f %.6f %.6f %.6f %.6f %.6f %d %d %d')
+        '''Write points3d.ply for 3DGS init (volume AABB or surface sampling).'''
+        splats.save_points3d_ply(
+            scene,
+            directory,
+            self.is_object_visible,
+            self.visible_meshes_world_aabb,
+        )
 
     def save_json(self, directory, filename, data, indent=4):
         filepath = os.path.join(directory, filename)
@@ -246,7 +219,10 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             error_messages.append('Save path cannot be empty!')
 
         if scene.splats:
-            if self.visible_meshes_world_aabb(scene)[0] is None:
+            if getattr(scene, 'splats_sample_mode', 'AABB') == 'SURFACE':
+                if not splats.has_exportable_mesh(self.is_object_visible):
+                    error_messages.append('Gaussian Points (Surface) requires at least one visible mesh!')
+            elif self.visible_meshes_world_aabb(scene)[0] is None:
                 error_messages.append('Gaussian Points requires at least one visible mesh to compute the scene AABB!')
 
         if scene.splats and not scene.test_data and not scene.splats_test_dummy:
@@ -276,6 +252,13 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             'iNGP AABB': scene.aabb,
             'Gaussian Points': scene.splats,
             'Gaussian Points Count': scene.splats_nb_points if scene.splats else 0,
+            'Gaussian Points Sample': scene.splats_sample_mode if scene.splats else '',
+            'Gaussian Points Cull Occluded': (
+                scene.splats_cull_occluded
+                if scene.splats and scene.splats_sample_mode == 'SURFACE'
+                else None
+            ),
+            'Gaussian Points Seed': scene.seed if scene.splats else None,
             'Render Frames': scene.render_frames,
             'G-buffer Maps': scene.gbuffer,
             'G-buffer Channels': gbuffer.selected_output_channels(scene) if scene.gbuffer else [],

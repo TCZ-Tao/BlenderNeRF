@@ -36,7 +36,13 @@ class BlenderNeRF_UI(bpy.types.Panel):
             layout.prop(scene, 'splats', text='Gaussian Points (PLY file)')
 
             if scene.splats:
-                layout.prop(scene, 'splats_nb_points')
+                box = layout.box()
+                col = box.column(align=True)
+                row = col.row(align=True)
+                row.prop(scene, 'splats_sample_mode', expand=True)
+                col.prop(scene, 'splats_nb_points')
+                if scene.splats_sample_mode == 'SURFACE':
+                    col.prop(scene, 'splats_cull_occluded')
 
             layout.prop(scene, 'splats_test_dummy', text='Dummy Test Camera File')
 
