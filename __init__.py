@@ -2,7 +2,7 @@ import bpy
 
 # Reload Scripts (F3) re-imports this file; without importlib.reload, Python
 # keeps cached submodules, so UI/operator edits never show up.
-from . import gbuffer, helper, splats, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator
+from . import gbuffer, helper, splats, blender_nerf_operator, blender_nerf_ui, sof_ui, ttc_ui, cos_ui, sof_operator, ttc_operator, cos_operator, camera_visualization
 
 if 'bpy' in locals():
     import importlib
@@ -17,6 +17,7 @@ if 'bpy' in locals():
     importlib.reload(sof_operator)
     importlib.reload(ttc_operator)
     importlib.reload(cos_operator)
+    importlib.reload(camera_visualization)
 
 
 # blender info
@@ -153,6 +154,8 @@ def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
 
+    camera_visualization.register()
+
     bpy.app.handlers.render_complete.append(helper.post_render_complete)
     bpy.app.handlers.render_cancel.append(helper.post_render_cancel)
     bpy.app.handlers.frame_change_post.append(helper.cos_camera_update)
@@ -161,6 +164,8 @@ def register():
 
 # deregister addon
 def unregister():
+    camera_visualization.unregister()
+
     for (prop_name, _) in PROPS:
         delattr(bpy.types.Scene, prop_name)
 
