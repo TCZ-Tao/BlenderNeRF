@@ -35,6 +35,7 @@ DATA_CHANNELS = (
     "linear_depth",
     "material_id",
     "material_id_vis",
+    "light_mask",
 )
 
 CHANNEL_PROPS = (
@@ -47,6 +48,7 @@ CHANNEL_PROPS = (
     ("gbuffer_linear_depth", "linear_depth"),
     ("gbuffer_material_id", "material_id"),
     ("gbuffer_material_id_vis", "material_id_vis"),
+    ("gbuffer_light_mask", "light_mask"),
 )
 
 _DATA_CHANNELS = {
@@ -58,9 +60,9 @@ _DATA_CHANNELS = {
     "material_id",
 }
 _EXR_CHANNELS = {"material_id", "linear_depth"}
-_OPAQUE_CHANNELS = {"material_id", "material_id_vis", "linear_depth"}
+_OPAQUE_CHANNELS = {"material_id", "material_id_vis", "linear_depth", "light_mask"}
 _NORMAL_CHANNELS = {"geometric_normal", "shading_normal"}
-_ID_WORLD_CHANNELS = {"material_id", "material_id_vis", "linear_depth"}
+_ID_WORLD_CHANNELS = {"material_id", "material_id_vis", "linear_depth", "light_mask"}
 
 _CHANNEL_SOCKET = {
     "albedo": "Base Color",
@@ -206,6 +208,95 @@ def mesh_materials(scene) -> list:
             seen.add(mat.name)
             mats.append(mat)
     return mats
+
+
+_LIGHT_EPS = 1e-6
+
+
+def _socket_emits(inp) -> bool:
+    """True if a color/value socket is linked or has a positive (non-black) default."""
+    if inp is None:
+        return False
+    if inp.is_linked:
+        return True
+    val = inp.default_value
+    try:
+        if hasattr(val, "__len__") and not isinstance(val, (str, bytes)):
+            return any(float(x) > _LIGHT_EPS for x in list(val)[:3])
+        return float(val) > _LIGHT_EPS
+    except (TypeError, ValueError):
+        return False
+
+
+def _emission_shader_emits(node) -> bool:
+    return _socket_emits(node.inputs.get("Strength")) and _socket_emits(node.inputs.get("Color"))
+
+
+def _principled_emits(bsdf) -> bool:
+    """Principled is a light only if emission strength and color are both non-zero.
+
+    Blender 4+ defaults Strength to 1 with a black Emission Color, which is not a light.
+    """
+    strength = bsdf.inputs.get("Emission Strength")
+    color = bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
+    if strength is None:
+        return False
+    if not strength.is_linked:
+        try:
+            if float(strength.default_value) <= _LIGHT_EPS:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return _socket_emits(color)
+
+
+def _iter_surface_nodes(node_tree, visited_trees=None):
+    """Yield shader nodes that feed the active Material / Group Output surface."""
+    if node_tree is None:
+        return
+    if visited_trees is None:
+        visited_trees = set()
+    tree_id = id(node_tree)
+    if tree_id in visited_trees:
+        return
+    visited_trees.add(tree_id)
+
+    stack = []
+    for node in node_tree.nodes:
+        if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
+            surf = node.inputs.get("Surface")
+            if surf is not None and surf.is_linked:
+                stack.append(surf.links[0].from_node)
+        elif node.type == "OUTPUT_GROUP":
+            for inp in node.inputs:
+                if inp.is_linked and getattr(inp, "type", "") == "SHADER":
+                    stack.append(inp.links[0].from_node)
+
+    seen = set()
+    while stack:
+        node = stack.pop()
+        key = (tree_id, node.as_pointer() if hasattr(node, "as_pointer") else node.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield node
+        if node.type == "GROUP" and getattr(node, "node_tree", None) is not None:
+            yield from _iter_surface_nodes(node.node_tree, visited_trees)
+        for inp in node.inputs:
+            if inp.is_linked:
+                stack.append(inp.links[0].from_node)
+
+
+def material_is_light(mat) -> bool:
+    """True if the material's surface shader path contains a non-zero emitter."""
+    if mat is None or not mat.use_nodes or mat.node_tree is None:
+        return False
+    for node in _iter_surface_nodes(mat.node_tree):
+        if node.type == "EMISSION" and _emission_shader_emits(node):
+            return True
+        if node.type == "BSDF_PRINCIPLED" and _principled_emits(node):
+            return True
+    return False
 
 
 def _set_emission_color(emission, channel: str, inp) -> None:
@@ -696,6 +787,14 @@ def _apply_gbuffer_channel(scene, channel: str, filepath: str) -> None:
     elif channel == "linear_depth":
         for mat in materials:
             links = apply_depth_override(mat.node_tree)
+            overrides.append((mat.node_tree, links))
+    elif channel == "light_mask":
+        for mat in materials:
+            if material_is_light(mat):
+                color = (1.0, 1.0, 1.0, 1.0)
+            else:
+                color = (0.0, 0.0, 0.0, 1.0)
+            links = apply_id_override(mat.node_tree, color)
             overrides.append((mat.node_tree, links))
     else:
         for mat in materials:

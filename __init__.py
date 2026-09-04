@@ -69,6 +69,7 @@ PROPS = [
     ('gbuffer_linear_depth', bpy.props.BoolProperty(name='Linear Depth', description='Render camera-space linear depth (EXR) into the linear_depth folder', default=True) ),
     ('gbuffer_material_id', bpy.props.BoolProperty(name='Material ID', description='Render numeric material IDs (EXR) into the material_id folder', default=True) ),
     ('gbuffer_material_id_vis', bpy.props.BoolProperty(name='Material ID Viz', description='Render colorized material ID visualization into the material_id_vis folder', default=True) ),
+    ('gbuffer_light_mask', bpy.props.BoolProperty(name='Light Mask', description='Render a binary mask of emissive surfaces (1 = light, 0 = other) into the light_mask folder', default=True) ),
     ('nerf', bpy.props.BoolProperty(name='NeRF', description='Whether to export the camera transforms.json files in the defaut NeRF file format convention', default=False) ),
     ('save_path', bpy.props.StringProperty(name='Save Path', description='Path to the output directory in which the synthetic dataset will be stored', subtype='DIR_PATH') ),
     ('compress_to_zip', bpy.props.BoolProperty(name='Compress to ZIP', description='Whether to archive the dataset as a ZIP file and delete the uncompressed folder. Uncheck to keep files under <save path>/<name>', default=False) ),

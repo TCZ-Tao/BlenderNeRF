@@ -60,6 +60,7 @@ class BlenderNeRF_UI(bpy.types.Panel):
                 col.prop(scene, 'gbuffer_linear_depth')
                 col.prop(scene, 'gbuffer_material_id')
                 col.prop(scene, 'gbuffer_material_id_vis')
+                col.prop(scene, 'gbuffer_light_mask')
 
             layout.separator()
             layout.label(text='File Format')

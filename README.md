@@ -187,6 +187,7 @@ When `G-buffer Maps` is on, PLAY SOF / TTC / COS runs an extra unlit pass per se
 | Linear Depth | `linear_depth` | OpenEXR 32-bit | Camera-space linear depth |
 | Material ID | `material_id` | OpenEXR 32-bit | Numeric IDs (`R=G=B=id`; `0` = background, `1` = first material, …) |
 | Material ID Viz | `material_id_vis` | PNG | Colorized ID visualization (Kelly 1965 palette) |
+| Light Mask | `light_mask` | PNG | Binary mask of emissive surfaces (`1` = light, `0` = other / background). A material counts as a light if its surface path has an Emission shader or a Principled BSDF with non-zero emission color and strength. |
 
 If Material ID or Material ID Viz is selected, a `material_id.json` mapping (`id`, material `name`, `viz_color`) is written at the dataset root.
 
