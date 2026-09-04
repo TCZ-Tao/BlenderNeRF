@@ -805,9 +805,9 @@ def configure_train_timeline(scene):
 def configure_test_timeline(scene):
     if scene.rendering[0]:  # SOF : restore default frame step, keep full timeline
         scene.frame_step = scene.init_frame_step
-    elif scene.rendering[1]:  # TTC : switch to test camera over the scene timeline
+    elif scene.rendering[1]:  # TTC : switch to test camera over the Test Frames range
         scene.camera = scene.camera_test_target
-        scene.frame_end = scene.init_frame_end
+        scene.frame_end = scene.frame_start + scene.ttc_nb_test_frames - 1
     elif scene.rendering[2]:  # COS : selected camera, Test Frames count
         restore_user_camera(scene)
         scene.frame_end = scene.frame_start + scene.cos_nb_test_frames - 1

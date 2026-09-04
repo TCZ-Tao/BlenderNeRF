@@ -140,12 +140,13 @@ Below are described the properties specific to each method (the `Name` property 
 
 ### How to TTC
 
-* `Frames` (by default set to **100**) : number of training frames used from the training camera
+* `Train Frames` (by default set to **100**) : number of training frames used from the training camera
+* `Test Frames` (by default set to **100**) : number of testing frames captured from the testing camera
 * `Train Cam` (empty by default) : camera used for registering the training data
 * `Test Cam` (empty by default) : camera used for registering the testing data
 * `PLAY TTC` : play the **Train and Test Cameras** method operator to export NeRF data
 
-`Frames` amount of training frames will be captured using the `Train Cam` object, starting from the scene start frame. Testing uses `Test Cam` over the scene frame range.
+`Train Frames` amount of training frames will be captured using the `Train Cam` object, starting from the scene start frame. Testing uses `Test Cam` over `Test Frames` frames, also starting from the scene start frame. Neither range follows the scene `Frame End`; both are counts from `Frame Start`.
 
 ### How to COS
 

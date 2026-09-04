@@ -103,7 +103,8 @@ PROPS = [
 
     # ttc properties
     ('ttc_dataset_name', bpy.props.StringProperty(name='Name', description='Name of the TTC dataset : the data will be stored under <save path>/<name>', default='dataset') ),
-    ('ttc_nb_frames', bpy.props.IntProperty(name='Frames', description='Number of training frames from the training camera', default=100, soft_min=1) ),
+    ('ttc_nb_frames', bpy.props.IntProperty(name='Train Frames', description='Number of training frames from the training camera', default=100, soft_min=1) ),
+    ('ttc_nb_test_frames', bpy.props.IntProperty(name='Test Frames', description='Number of testing frames captured from the testing camera', default=100, soft_min=1) ),
     ('camera_train_target', bpy.props.PointerProperty(type=bpy.types.Object, name=TRAIN_CAM, description='Pointer to the training camera', poll=helper.poll_is_camera) ),
     ('camera_test_target', bpy.props.PointerProperty(type=bpy.types.Object, name=TEST_CAM, description='Pointer to the testing camera', poll=helper.poll_is_camera) ),
 

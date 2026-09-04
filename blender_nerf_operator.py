@@ -97,6 +97,8 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             end = scene.frame_start + scene.cos_nb_test_frames - 1
         elif method == 'TTC' and mode == 'TRAIN':
             end = scene.frame_start + scene.ttc_nb_frames - 1
+        elif method == 'TTC' and mode == 'TEST':
+            end = scene.frame_start + scene.ttc_nb_test_frames - 1
         else:
             end = scene.frame_end
 
@@ -276,7 +278,8 @@ class BlenderNeRF_Operator(bpy.types.Operator):
         elif method == 'TTC':
             logdata['Train Camera Name'] = scene.camera_train_target.name
             logdata['Test Camera Name'] = scene.camera_test_target.name
-            logdata['Frames'] = scene.ttc_nb_frames
+            logdata['Train Frames'] = scene.ttc_nb_frames
+            logdata['Test Frames'] = scene.ttc_nb_test_frames
             logdata['Dataset Name'] = scene.ttc_dataset_name
 
         else:
