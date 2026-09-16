@@ -52,6 +52,7 @@ class BlenderNeRF_UI(bpy.types.Panel):
                 box = layout.box()
                 col = box.column(align=True)
                 col.prop(scene, 'gbuffer_rgba')
+                col.prop(scene, 'gbuffer_linear_rgb')
                 col.prop(scene, 'gbuffer_albedo')
                 col.prop(scene, 'gbuffer_roughness')
                 col.prop(scene, 'gbuffer_metallic')

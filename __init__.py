@@ -62,6 +62,7 @@ PROPS = [
     ('splats_test_dummy', bpy.props.BoolProperty(name='Dummy Test Camera File', description='Write an empty transforms_test.json and skip test-image rendering, even if Test is on', default=False) ),
     ('gbuffer', bpy.props.BoolProperty(name='G-buffer Maps', description='Whether to render extra unlit G-buffer maps (albedo, roughness, normals, depth, material ID) into per-channel folders', default=False) ),
     ('gbuffer_rgba', bpy.props.BoolProperty(name='RGBA', description='Render the original RGB(A) frames into the rgba folder', default=True) ),
+    ('gbuffer_linear_rgb', bpy.props.BoolProperty(name='Linear RGB', description='Render the lit beauty in linear HDR (no Filmic/AgX) as OpenEXR into the linear_rgb folder', default=True) ),
     ('gbuffer_albedo', bpy.props.BoolProperty(name='Albedo', description='Render base color / albedo into the albedo folder', default=True) ),
     ('gbuffer_roughness', bpy.props.BoolProperty(name='Roughness', description='Render roughness into the roughness folder', default=True) ),
     ('gbuffer_metallic', bpy.props.BoolProperty(name='Metallic', description='Render metallic into the metallic folder', default=True) ),

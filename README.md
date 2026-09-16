@@ -175,11 +175,12 @@ Note that activating the `Sphere` and `Camera` properties creates a `BlenderNeRF
 
 ## G-buffer Maps
 
-When `G-buffer Maps` is on, PLAY SOF / TTC / COS runs an extra unlit pass per selected channel (EEVEE, 1 sample, no shadows / raytracing / motion blur). The original RGB(A) render still uses the scene engine (typically Cycles). Channels can be toggled independently; all default to on once G-buffer is enabled:
+When `G-buffer Maps` is on, PLAY SOF / TTC / COS runs extra passes per selected channel. **RGBA** and **Linear RGB** use the scene engine (typically Cycles) with the same lighting and samples; Linear RGB writes 32-bit EXR with a `Raw` view transform so Filmic/AgX never runs. Other channels are unlit EEVEE (1 sample, no shadows / raytracing / motion blur). Channels can be toggled independently; all default to on once G-buffer is enabled:
 
 | Channel | Folder | Format | Notes |
 |---|---|---|---|
-| RGBA | `rgba` | scene format | Original lit RGB(A) frames |
+| RGBA | `rgba` | scene format | Original lit RGB(A) frames (view transform / LDR) |
+| Linear RGB | `linear_rgb` | OpenEXR 32-bit | Same lit beauty as RGBA, scene engine and samples, saved linear HDR (`Raw`, no Filmic/AgX) |
 | Albedo | `albedo` | PNG | Principled Base Color |
 | Roughness | `roughness` | PNG | Principled Roughness |
 | Metallic | `metallic` | PNG | Principled Metallic |

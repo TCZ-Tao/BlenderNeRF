@@ -25,6 +25,8 @@ HELPER_PREFIX = "_PBRMAP_"
 ID_WORLD_NAME = "_PBRMAP_ID_WORLD"
 
 RGBA_CHANNEL = "rgba"
+LINEAR_RGB_CHANNEL = "linear_rgb"
+_LIT_CHANNELS = {RGBA_CHANNEL, LINEAR_RGB_CHANNEL}
 
 DATA_CHANNELS = (
     "albedo",
@@ -40,6 +42,7 @@ DATA_CHANNELS = (
 
 CHANNEL_PROPS = (
     ("gbuffer_rgba", RGBA_CHANNEL),
+    ("gbuffer_linear_rgb", LINEAR_RGB_CHANNEL),
     ("gbuffer_albedo", "albedo"),
     ("gbuffer_roughness", "roughness"),
     ("gbuffer_metallic", "metallic"),
@@ -59,7 +62,7 @@ _DATA_CHANNELS = {
     "linear_depth",
     "material_id",
 }
-_EXR_CHANNELS = {"material_id", "linear_depth"}
+_EXR_CHANNELS = {"material_id", "linear_depth", LINEAR_RGB_CHANNEL}
 _OPAQUE_CHANNELS = {"material_id", "material_id_vis", "linear_depth", "light_mask"}
 _NORMAL_CHANNELS = {"geometric_normal", "shading_normal"}
 _ID_WORLD_CHANNELS = {"material_id", "material_id_vis", "linear_depth", "light_mask"}
@@ -112,7 +115,7 @@ def selected_output_channels(scene) -> list[str]:
 def needs_mesh_materials(scene) -> bool:
     if not scene.gbuffer:
         return False
-    return any(ch != RGBA_CHANNEL for ch in selected_output_channels(scene))
+    return any(ch not in _LIT_CHANNELS for ch in selected_output_channels(scene))
 
 
 def build_passes(do_train: bool, do_test: bool, scene) -> list[tuple[str, str]]:
@@ -176,6 +179,10 @@ def apply_pass_settings(scene, channel: str, out_dir: str) -> None:
 
     if (not scene.gbuffer) or channel == RGBA_CHANNEL:
         scene.render.filepath = filepath
+        return
+
+    if channel == LINEAR_RGB_CHANNEL:
+        prepare_linear_rgb_render(scene, filepath)
         return
 
     _apply_gbuffer_channel(scene, channel, filepath)
@@ -670,6 +677,21 @@ def _apply_color_management(scene, channel: str) -> None:
     img.view_settings.look = "None"
     img.view_settings.exposure = 0.0
     img.view_settings.gamma = 1.0
+
+
+def prepare_linear_rgb_render(scene, filepath: str) -> None:
+    """Lit beauty in linear HDR: same engine/samples/materials as RGBA, EXR + Raw (no view transform)."""
+    scene.render.filepath = filepath
+    scene.render.use_compositing = False
+    scene.render.use_sequencer = False
+    scene.render.dither_intensity = 0.0
+
+    img = scene.render.image_settings
+    img.file_format = "OPEN_EXR"
+    img.color_mode = "RGBA" if scene.render.film_transparent else "RGB"
+    img.color_depth = "32"
+    img.exr_codec = "ZIP"
+    _apply_color_management(scene, LINEAR_RGB_CHANNEL)
 
 
 def prepare_render(scene, channel: str, filepath: str) -> None:
