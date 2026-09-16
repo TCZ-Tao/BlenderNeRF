@@ -157,6 +157,8 @@ def parse_args(argv):
                         help='HDRI file used as World lighting (--mode relight)')
     parser.add_argument('--no-render', action='store_true',
                         help='Write transforms/JSON only, skip image renders (export mode)')
+    parser.add_argument('--supplement', action='store_true',
+                        help='Skip existing images; still refresh logs, transforms, and metadata')
     parser.add_argument('--engine', default='',
                         help='Render engine override, e.g. CYCLES')
     parser.add_argument('--cycles-device', default='',
@@ -177,8 +179,11 @@ def parse_args(argv):
             parser.error('--mode relight requires --envmap PATH')
         if args.no_render:
             parser.error('--no-render cannot be used with --mode relight')
+        # --supplement is allowed for relight (skip existing test_rli frames)
     elif args.envmap:
         parser.error('--envmap requires --mode relight')
+    if args.no_render and args.supplement:
+        parser.error('--no-render cannot be used with --supplement')
     return args
 
 
@@ -246,6 +251,8 @@ def main():
             scene.cos_dataset_name = args.name
     if args.no_render:
         scene.render_frames = False
+    if args.supplement:
+        scene.supplement_mode = True
     if args.engine:
         scene.render.engine = args.engine
     if args.cycles_device:
@@ -281,7 +288,8 @@ def main():
     print(
         f'[BlenderNeRF] mode={args.mode} method={args.method} save_path={save_path} '
         f'name={dataset_name!r} '
-        f'render_frames={bool(scene.render_frames)} engine={scene.render.engine} '
+        f'render_frames={bool(scene.render_frames)} supplement={bool(scene.supplement_mode)} '
+        f'engine={scene.render.engine} '
         f'background={bool(bpy.app.background)}'
         + (f' envmap={envmap!r}' if envmap else '')
     )

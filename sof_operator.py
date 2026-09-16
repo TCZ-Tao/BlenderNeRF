@@ -32,7 +32,8 @@ class SubsetOfFrames(blender_nerf_operator.BlenderNeRF_Operator):
         os.makedirs(output_path, exist_ok=True)
 
         if scene.logs: self.save_log_file(scene, output_path, method='SOF')
-        if scene.splats: self.save_splats_ply(scene, output_path)
+        if helper.should_write_splats_ply(scene, output_path):
+            self.save_splats_ply(scene, output_path)
         helper.write_scene_metadata(scene, output_path, scene.sof_dataset_name)
         gbuffer.write_material_id_json(scene, output_path)
 

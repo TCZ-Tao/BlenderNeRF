@@ -82,6 +82,7 @@ The add-on properties panel is available under `3D View > N panel > BlenderNeRF`
 * `Test` (activated by default) : whether to register testing data (camera poses and, if `Render Frames` is on, images)
 * `iNGP AABB` (by default set to **4**) : aabb scale parameter as described in Instant NGP (more details below). Enable `Show` to preview the origin-centered cube in the viewport
 * `Render Frames` (activated by default) : whether to render train/test images. If off, only the `transforms_*.json` files are written
+* `Supplement Mode` (deactivated by default) : skip images that already exist (empty files are treated as missing). Logs, `transforms_*.json`, `metadata.json`, and `material_id.json` are still rewritten. Existing `points3d.ply` is kept. Incomplete passes render only the missing frames (`use_overwrite` off)
 * `Hide Render View` (deactivated by default) : keep the current workspace instead of opening the render result window
 * `Save Log File` (deactivated by default) : whether to save a log file containing reproducibility information on the **BlenderNeRF** run
 * `File Format` (**NGP** by default) : whether to export the camera files in the Instant NGP or defaut NeRF file format convention
@@ -196,7 +197,7 @@ If Material ID or Material ID Viz is selected, a `material_id.json` mapping (`id
 
 ## Relight Mode
 
-Relight Mode renders **test-camera** frames under a different World HDRI for inverse-rendering / relighting GT. It does **not** re-export transforms, G-buffer maps, or train views, and it does **not** zip the dataset.
+Relight Mode renders **test-camera** frames under a different World HDRI for inverse-rendering / relighting GT. It does **not** re-export transforms, G-buffer maps, or train views, and it does **not** zip the dataset. With `Supplement Mode` on, existing `test_rli` frames are skipped.
 
 In the shared panel, enable `Relight Mode`:
 
@@ -297,6 +298,7 @@ Optional `cli.py` flags:
 * `--name` : override the method **Name** (dataset folder name; not prefixed with SOF/TTC/COS)
 * `--envmap` : HDRI file; required with `--mode relight`
 * `--no-render` : write transforms / JSON only, skip image renders (`export` mode)
+* `--supplement` : skip existing images; still refresh logs, transforms, and metadata
 * `--engine` : render engine override, e.g. `CYCLES`
 * `--cycles-device` : Cycles compute device (see above)
 

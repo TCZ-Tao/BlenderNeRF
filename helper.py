@@ -822,6 +822,53 @@ def restore_user_camera(scene):
     if cam is not None:
         scene.camera = cam
 
+def _file_is_present(path):
+    try:
+        return os.path.isfile(path) and os.path.getsize(path) > 0
+    except OSError:
+        return False
+
+
+def expected_frame_path(scene, out_dir, frame, channel=None):
+    '''Path Blender would write for this frame under out_dir, with the channel extension.'''
+    prev = scene.render.filepath
+    scene.render.filepath = os.path.join(out_dir, '')
+    try:
+        path = bpy.path.abspath(scene.render.frame_path(frame=frame))
+    finally:
+        scene.render.filepath = prev
+    if channel is not None:
+        ext = gbuffer.channel_extension(scene, channel)
+        root, cur = os.path.splitext(path)
+        if cur.lower() != ext.lower():
+            path = root + ext
+    return path
+
+
+def count_missing_frames(scene, out_dir, channel=None):
+    '''Return (missing, total) for the current timeline under out_dir.'''
+    missing = 0
+    total = 0
+    step = max(1, int(scene.frame_step))
+    for frame in range(int(scene.frame_start), int(scene.frame_end) + 1, step):
+        total += 1
+        path = expected_frame_path(scene, out_dir, frame, channel)
+        if not _file_is_present(path):
+            missing += 1
+    return missing, total
+
+
+def should_write_splats_ply(scene, output_path):
+    if not scene.splats:
+        return False
+    if getattr(scene, 'supplement_mode', False):
+        ply = os.path.join(output_path, 'points3d.ply')
+        if _file_is_present(ply):
+            print('[BlenderNeRF] skip points3d.ply (already exists)')
+            return False
+    return True
+
+
 def start_render_pass(scene):
     '''Configure the current G-buffer/RGB pass and invoke an animation render.'''
     scene.nerf_job_status = JOB_RUNNING
@@ -844,7 +891,20 @@ def start_render_pass(scene):
         f"camera {scene.camera.name if scene.camera else None}  "
         f"-> {out_dir}"
     )
+
+    if getattr(scene, 'supplement_mode', False):
+        missing, total = count_missing_frames(scene, out_dir, channel)
+        if total > 0 and missing == 0:
+            print(f'[BlenderNeRF] skip {split}/{channel} ({total} frames already exist)')
+            scene.nerf_job_status = JOB_DONE
+            if not bpy.app.background:
+                schedule_next_render_pass()
+            return
+        print(f'[BlenderNeRF] supplement {split}/{channel}: {missing} missing / {total} frames')
+
     gbuffer.apply_pass_settings(scene, channel, out_dir)
+    if getattr(scene, 'supplement_mode', False):
+        scene.render.use_overwrite = False
     apply_hide_render_view(scene)
     result = invoke_animation_render()
 
@@ -921,8 +981,12 @@ def begin_test_render(scene):
     scene.render.filepath = os.path.join(output_test, '')
     invoke_animation_render()
 
+_relight_use_overwrite = None
+
+
 def start_relight_render(scene, out_dir):
     '''Configure the test-camera timeline and invoke a single RGB animation render.'''
+    global _relight_use_overwrite
     scene.nerf_job_status = JOB_RUNNING
     configure_test_timeline(scene)
     print(
@@ -931,6 +995,17 @@ def start_relight_render(scene, out_dir):
         f"camera {scene.camera.name if scene.camera else None}  "
         f"-> {out_dir}"
     )
+    if getattr(scene, 'supplement_mode', False):
+        missing, total = count_missing_frames(scene, out_dir)
+        if total > 0 and missing == 0:
+            print(f'[BlenderNeRF] skip relight ({total} frames already exist)')
+            scene.nerf_job_status = JOB_DONE
+            if not bpy.app.background:
+                finalize_relight(scene)
+            return {'FINISHED'}
+        _relight_use_overwrite = getattr(scene.render, 'use_overwrite', True)
+        scene.render.use_overwrite = False
+        print(f'[BlenderNeRF] supplement relight: {missing} missing / {total} frames')
     apply_hide_render_view(scene)
     result = invoke_animation_render()
 
@@ -943,6 +1018,10 @@ def start_relight_render(scene, out_dir):
 
 def finalize_relight(scene):
     '''Restore World HDRI, camera, and timeline after a relight render. Does not zip.'''
+    global _relight_use_overwrite
+    if _relight_use_overwrite is not None and hasattr(scene.render, 'use_overwrite'):
+        scene.render.use_overwrite = _relight_use_overwrite
+        _relight_use_overwrite = None
     restore_world_envmap(scene)
     restore_hide_render_view(scene)
 

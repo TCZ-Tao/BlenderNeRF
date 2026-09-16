@@ -45,6 +45,7 @@ PROPS = [
     ('aabb', bpy.props.IntProperty(name='iNGP AABB', description='AABB scale as defined in Instant NGP: cube side length centered at the world origin', default=4, soft_min=1, soft_max=128, update=helper.properties_ui_upd) ),
     ('show_aabb', bpy.props.BoolProperty(name='Show iNGP AABB', description='Whether to show the Instant NGP AABB cube in the viewport', default=False, update=helper.visualize_aabb) ),
     ('render_frames', bpy.props.BoolProperty(name='Render Frames', description='Whether train/test frames should be rendered. If not selected, only the transforms.json files will be generated', default=True) ),
+    ('supplement_mode', bpy.props.BoolProperty(name='Supplement Mode', description='Skip images that already exist; still refresh logs, transforms.json, and other metadata. Missing frames are rendered with overwrite disabled', default=False) ),
     ('hide_render_view', bpy.props.BoolProperty(name='Hide Render View', description='Keep the current workspace instead of opening the render result window', default=False) ),
     ('logs', bpy.props.BoolProperty(name='Save Log File', description='Whether to create a log file containing information on the BlenderNeRF run', default=False) ),
     ('splats', bpy.props.BoolProperty(name='Gaussian Points', description='Whether to export a points3d.ply file of Gaussian Splatting initialization points', default=False) ),

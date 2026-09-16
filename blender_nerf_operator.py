@@ -262,6 +262,7 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             ),
             'Gaussian Points Seed': scene.seed if scene.splats else None,
             'Render Frames': scene.render_frames,
+            'Supplement Mode': scene.supplement_mode,
             'G-buffer Maps': scene.gbuffer,
             'G-buffer Channels': gbuffer.selected_output_channels(scene) if scene.gbuffer else [],
             'File Format': 'NeRF' if scene.nerf else 'NGP',

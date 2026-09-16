@@ -63,6 +63,18 @@ _DATA_CHANNELS = {
     "material_id",
 }
 _EXR_CHANNELS = {"material_id", "linear_depth", LINEAR_RGB_CHANNEL}
+_FORMAT_EXTENSIONS = {
+    "PNG": ".png",
+    "JPEG": ".jpg",
+    "JPEG2000": ".jp2",
+    "OPEN_EXR": ".exr",
+    "OPEN_EXR_MULTILAYER": ".exr",
+    "TIFF": ".tif",
+    "BMP": ".bmp",
+    "TARGA": ".tga",
+    "TARGA_RAW": ".tga",
+    "WEBP": ".webp",
+}
 _OPAQUE_CHANNELS = {"material_id", "material_id_vis", "linear_depth", "light_mask"}
 _NORMAL_CHANNELS = {"geometric_normal", "shading_normal"}
 _ID_WORLD_CHANNELS = {"material_id", "material_id_vis", "linear_depth", "light_mask"}
@@ -103,6 +115,17 @@ _job: dict = {
     "render_snapshot": None,
     "overrides": [],
 }
+
+
+def channel_extension(scene, channel: str) -> str:
+    """File extension this channel will write, matching prepare_render / scene format."""
+    if (not scene.gbuffer) or channel == RGBA_CHANNEL:
+        fmt = scene.render.image_settings.file_format
+    elif channel in _EXR_CHANNELS:
+        fmt = "OPEN_EXR"
+    else:
+        fmt = "PNG"
+    return _FORMAT_EXTENSIONS.get(fmt, ".png")
 
 
 def selected_output_channels(scene) -> list[str]:
@@ -601,6 +624,7 @@ def snapshot_render_state(scene) -> dict:
         "color_depth": img.color_depth,
         "color_management": img.color_management,
         "exr_codec": img.exr_codec,
+        "use_overwrite": getattr(scene.render, "use_overwrite", True),
         "samples": cycles.samples,
         "use_adaptive_sampling": cycles.use_adaptive_sampling,
         "use_denoising": cycles.use_denoising,
@@ -634,6 +658,8 @@ def restore_render_state(scene, state: dict) -> None:
     img.color_depth = state["color_depth"]
     img.color_management = state["color_management"]
     img.exr_codec = state["exr_codec"]
+    if "use_overwrite" in state and hasattr(scene.render, "use_overwrite"):
+        scene.render.use_overwrite = state["use_overwrite"]
     scene.cycles.samples = state["samples"]
     scene.cycles.use_adaptive_sampling = state["use_adaptive_sampling"]
     scene.cycles.use_denoising = state["use_denoising"]

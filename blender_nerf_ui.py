@@ -30,6 +30,9 @@ class BlenderNeRF_UI(bpy.types.Panel):
 
             layout.separator()
             layout.prop(scene, 'render_frames')
+            row = layout.row()
+            row.enabled = scene.render_frames
+            row.prop(scene, 'supplement_mode')
             layout.prop(scene, 'hide_render_view')
 
             layout.prop(scene, 'logs')
