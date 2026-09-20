@@ -78,8 +78,16 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             'h': height_res_in_px,
             'aabb_scale': scene.aabb
         }
+        camera_intr_dict.update(helper.camera_clip_fields(camera))
 
-        return {'camera_angle_x': camera_angle_x} if scene.nerf else camera_intr_dict
+        if scene.nerf:
+            nerf_dict = {
+                'camera_angle_x': camera_angle_x,
+                'camera_angle_y': camera_angle_y,
+            }
+            nerf_dict.update(helper.camera_clip_fields(camera))
+            return nerf_dict
+        return camera_intr_dict
 
     # camera extrinsics (transform matrices)
     def get_camera_extrinsics(self, scene, camera, mode='TRAIN', method='SOF'):

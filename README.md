@@ -109,7 +109,7 @@ Notice that each method has its distinctive `Name` property (by default set to `
 
 ```text
 <save path>/<name>/
-  metadata.json              # scene, imw, imh, envmap, envmap_inten, spp
+  metadata.json              # scene, imw, imh, envmap, envmap_inten, spp, film_transparent
   transforms_train.json
   transforms_test.json
   train/                     # RGB when G-buffer is off
@@ -129,7 +129,9 @@ test/rgba/    test/albedo/    …
 
 `transforms_*.json` `file_path` values then point at `train/rgba/` (or `test/rgba/`) instead of `train/` / `test/`.
 
-`metadata.json` records the dataset name, output resolution, World environment-map filename and background strength, and the render sample count (Cycles `samples`, or EEVEE TAA samples).
+`metadata.json` records the dataset name, output resolution, World environment-map filename and background strength, the render sample count (Cycles `samples`, or EEVEE TAA samples), and whether the film is transparent.
+
+`transforms_*.json` stores `clip_start` / `clip_end` (Blender camera clip, i.e. 2DGS `znear` / `zfar`), `shift_x` / `shift_y`, and `use_dof` next to `camera_angle_x`. If depth of field is on, `focus_distance` and `aperture_fstop` are included. Train and test files use that split's camera, so COS/TTC can differ. The NeRF format also writes `camera_angle_y`.
 
 Below are described the properties specific to each method (the `Name` property is left out, since already discussed above).
 

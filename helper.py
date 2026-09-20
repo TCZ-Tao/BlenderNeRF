@@ -684,6 +684,22 @@ def render_spp(scene):
                 return int(getattr(eevee, attr))
     return 0
 
+def camera_clip_fields(camera):
+    '''Per-camera clip, lens shift, and depth of field; same units as Camera data.'''
+    cam = camera.data
+    fields = {
+        'clip_start': round(float(cam.clip_start), 6),
+        'clip_end': round(float(cam.clip_end), 6),
+        'shift_x': round(float(cam.shift_x), 6),
+        'shift_y': round(float(cam.shift_y), 6),
+    }
+    dof = getattr(cam, 'dof', None)
+    fields['use_dof'] = bool(dof.use_dof) if dof is not None else False
+    if fields['use_dof']:
+        fields['focus_distance'] = round(float(dof.focus_distance), 6)
+        fields['aperture_fstop'] = round(float(dof.aperture_fstop), 6)
+    return fields
+
 def write_scene_metadata(scene, output_path, dataset_name):
     '''Write a TensoIR-style scene metadata.json next to transforms_*.json.'''
     scale = scene.render.resolution_percentage / 100.0
@@ -695,6 +711,7 @@ def write_scene_metadata(scene, output_path, dataset_name):
         'envmap': envmap,
         'envmap_inten': envmap_inten,
         'spp': render_spp(scene),
+        'film_transparent': bool(scene.render.film_transparent),
     }
     filepath = os.path.join(output_path, 'metadata.json')
     with open(filepath, 'w') as file:
