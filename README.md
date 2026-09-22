@@ -135,6 +135,8 @@ test/rgba/    test/albedo/    …
 
 Below are described the properties specific to each method (the `Name` property is left out, since already discussed above).
 
+Both export formats write `camera_angle_x`, `camera_angle_y`, `fl_x`, `fl_y`, `cx`, `cy`, and integer image dimensions `w`, `h`. Intrinsics come from Blender's render projection, including sensor fit, image aspect, pixel aspect, and lens shift, rather than the camera's raw sensor-angle properties. Pixel coordinates start at the top left, with pixel centers at `(i + 0.5, j + 0.5)`. Angles follow the NeRF convention `2 * atan(image_size / (2 * focal_length))`; consumers must also use `cx` / `cy` for shifted cameras. Supplement Mode rewrites these fields for existing datasets without rerendering images; use the original camera and render settings.
+
 ### How to SOF
 
 * `Frame Step` (by default set to **3**) : **N** (as defined in the [Setting](#setting) section) = frequency at which the training frames are registered

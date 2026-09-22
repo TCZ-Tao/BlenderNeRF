@@ -18,50 +18,28 @@ class BlenderNeRF_Operator(bpy.types.Operator):
 
     # camera intrinsics
     def get_camera_intrinsics(self, scene, camera):
-        camera_angle_x = camera.data.angle_x
-        camera_angle_y = camera.data.angle_y
+        render = scene.render
+        width_res_in_px = max(1, render.resolution_x * render.resolution_percentage // 100)
+        height_res_in_px = max(1, render.resolution_y * render.resolution_percentage // 100)
 
-        # camera properties
-        f_in_mm = camera.data.lens # focal length in mm
-        scale = scene.render.resolution_percentage / 100
-        width_res_in_px = scene.render.resolution_x * scale # width
-        height_res_in_px = scene.render.resolution_y * scale # height
-        optical_center_x = width_res_in_px / 2
-        optical_center_y = height_res_in_px / 2
-
-        # pixel aspect ratios
-        size_x = scene.render.pixel_aspect_x * width_res_in_px
-        size_y = scene.render.pixel_aspect_y * height_res_in_px
-        pixel_aspect_ratio = scene.render.pixel_aspect_x / scene.render.pixel_aspect_y
-
-        # sensor fit and sensor size (and camera angle swap in specific cases)
-        if camera.data.sensor_fit == 'AUTO':
-            sensor_size_in_mm = camera.data.sensor_height if width_res_in_px < height_res_in_px else camera.data.sensor_width
-            if width_res_in_px < height_res_in_px:
-                sensor_fit = 'VERTICAL'
-                camera_angle_x, camera_angle_y = camera_angle_y, camera_angle_x
-            elif width_res_in_px > height_res_in_px:
-                sensor_fit = 'HORIZONTAL'
-            else:
-                sensor_fit = 'VERTICAL' if size_x <= size_y else 'HORIZONTAL'
-
-        else:
-            sensor_fit = camera.data.sensor_fit
-            if sensor_fit == 'VERTICAL':
-                sensor_size_in_mm = camera.data.sensor_height if width_res_in_px <= height_res_in_px else camera.data.sensor_width
-                if width_res_in_px <= height_res_in_px:
-                    camera_angle_x, camera_angle_y = camera_angle_y, camera_angle_x
-
-        # focal length for horizontal sensor fit
-        if sensor_fit == 'HORIZONTAL':
-            sensor_size_in_mm = camera.data.sensor_width
-            s_u = f_in_mm / sensor_size_in_mm * width_res_in_px
-            s_v = f_in_mm / sensor_size_in_mm * width_res_in_px * pixel_aspect_ratio
-
-        # focal length for vertical sensor fit
-        if sensor_fit == 'VERTICAL':
-            s_u = f_in_mm / sensor_size_in_mm * width_res_in_px / pixel_aspect_ratio
-            s_v = f_in_mm / sensor_size_in_mm * width_res_in_px
+        # Camera.angle_x/y describe the sensor, not the final render gate.
+        # Blender's projection includes sensor fit, image/pixel aspect and shift.
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        projection = camera.evaluated_get(depsgraph).calc_matrix_camera(
+            depsgraph,
+            x=width_res_in_px,
+            y=height_res_in_px,
+            scale_x=render.pixel_aspect_x,
+            scale_y=render.pixel_aspect_y,
+        )
+        s_u = projection[0][0] * width_res_in_px / 2
+        s_v = projection[1][1] * height_res_in_px / 2
+        # Pixel coordinates: origin at the top left; pixel centers at i + 0.5.
+        optical_center_x = (1 - projection[0][2]) * width_res_in_px / 2
+        optical_center_y = (1 + projection[1][2]) * height_res_in_px / 2
+        # NeRF FOV convention; shifted cameras also require cx/cy below.
+        camera_angle_x = 2 * math.atan(width_res_in_px / (2 * s_u))
+        camera_angle_y = 2 * math.atan(height_res_in_px / (2 * s_v))
 
         camera_intr_dict = {
             'camera_angle_x': camera_angle_x,
@@ -84,6 +62,12 @@ class BlenderNeRF_Operator(bpy.types.Operator):
             nerf_dict = {
                 'camera_angle_x': camera_angle_x,
                 'camera_angle_y': camera_angle_y,
+                'fl_x': s_u,
+                'fl_y': s_v,
+                'cx': optical_center_x,
+                'cy': optical_center_y,
+                'w': width_res_in_px,
+                'h': height_res_in_px,
             }
             nerf_dict.update(helper.camera_clip_fields(camera))
             return nerf_dict
