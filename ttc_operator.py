@@ -75,3 +75,36 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
             helper.maybe_compress_dataset(scene, output_path)
 
         return {'FINISHED'}
+
+
+class AssignTTCFrames(bpy.types.Operator):
+    '''Pool poses on the train and test cameras, then split them by Test Ratio'''
+    bl_idname = 'object.assign_ttc_frames'
+    bl_label = 'Assign TTC Frames'
+    bl_description = 'Bake both cameras to one key per frame, pool those poses, and randomly split them by Test Ratio using Seed'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        train_camera = scene.camera_train_target
+        test_camera = scene.camera_test_target
+
+        if train_camera == None or test_camera == None:
+            self.report({'ERROR'}, 'Be sure to have selected a train and test camera!')
+            return {'CANCELLED'}
+
+        if train_camera == test_camera:
+            self.report({'ERROR'}, 'Train and test cameras must be two different cameras!')
+            return {'CANCELLED'}
+
+        n_train, n_test = helper.redistribute_ttc_frames(
+            scene, train_camera, test_camera, scene.ttc_test_ratio, scene.seed)
+        scene.ttc_nb_frames = n_train
+        scene.ttc_nb_test_frames = n_test
+        if n_train or n_test:
+            last = scene.frame_start + max(n_train, n_test) - 1
+            if last > scene.frame_end:
+                scene.frame_end = last
+
+        self.report({'INFO'}, f'Assigned {n_train} train frames and {n_test} test frames (seed {scene.seed}).')
+        return {'FINISHED'}

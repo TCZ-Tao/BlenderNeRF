@@ -23,6 +23,14 @@ class TTC_UI(bpy.types.Panel):
         layout.prop_search(scene, 'camera_train_target', scene, 'objects')
         layout.prop_search(scene, 'camera_test_target', scene, 'objects')
 
+        box = layout.box()
+        box.use_property_split = True
+        box.prop(scene, 'ttc_test_ratio')
+        box.prop(scene, 'seed')
+        row = box.row()
+        row.use_property_split = False
+        row.operator('object.assign_ttc_frames', text='ASSIGN FRAMES')
+
         layout.separator()
         layout.prop(scene, 'ttc_dataset_name')
 

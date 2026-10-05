@@ -244,12 +244,171 @@ def iter_action_fcurves(id_data):
                     for fc in bag.fcurves:
                         yield fc
 
-def set_location_keyframe_interpolation(id_data, interpolation='LINEAR'):
+def set_keyframe_interpolation(id_data, data_paths, interpolation='LINEAR'):
+    paths = {data_paths} if isinstance(data_paths, str) else set(data_paths)
     for fc in iter_action_fcurves(id_data):
-        if fc.data_path != 'location':
+        if fc.data_path not in paths:
             continue
         for kp in fc.keyframe_points:
             kp.interpolation = interpolation
+
+_POSE_PATHS = ('location', 'rotation_euler', 'rotation_quaternion', 'rotation_axis_angle', 'scale')
+
+def rotation_data_path(obj):
+    if obj.rotation_mode == 'QUATERNION':
+        return 'rotation_quaternion'
+    if obj.rotation_mode == 'AXIS_ANGLE':
+        return 'rotation_axis_angle'
+    return 'rotation_euler'
+
+def _pose_fcurves(obj):
+    return [fc for fc in iter_action_fcurves(obj) if fc.data_path in _POSE_PATHS]
+
+def _has_nla_strips(obj):
+    ad = obj.animation_data
+    if ad is None:
+        return False
+    return any(track.strips for track in ad.nla_tracks)
+
+def _has_transform_drivers(obj):
+    ad = obj.animation_data
+    if ad is None:
+        return False
+    return any(driver.data_path in _POSE_PATHS for driver in ad.drivers)
+
+def pose_span(obj):
+    '''Inclusive integer frame span of pose keys and NLA strips, or None.
+
+    The third value is True when a key does not sit on an integer frame.
+    '''
+    times = [float(kp.co[0]) for fc in _pose_fcurves(obj) for kp in fc.keyframe_points]
+    ad = obj.animation_data
+    if ad is not None:
+        for track in ad.nla_tracks:
+            for strip in track.strips:
+                times.append(float(strip.frame_start))
+                times.append(float(strip.frame_end))
+    if not times:
+        return None
+    subframe = any(abs(t - round(t)) > 1e-4 for t in times)
+    start = int(math.floor(min(times) + 1e-8))
+    end = int(math.ceil(max(times) - 1e-8))
+    return start, max(start, end), subframe
+
+def every_pose_frame_is_keyed(obj):
+    '''True when every integer frame in the pose span has a key on each pose curve.'''
+    if _has_nla_strips(obj):
+        return False
+    span = pose_span(obj)
+    if span is None:
+        return True
+    start, end, subframe = span
+    if subframe:
+        return False
+    needed = range(start, end + 1)
+    for fc in _pose_fcurves(obj):
+        got = {int(round(kp.co[0])) for kp in fc.keyframe_points}
+        if any(frame not in got for frame in needed):
+            return False
+    return True
+
+def poses_are_literal(obj):
+    '''True when sampled integer frames are the keyed pose, with nothing else on top.'''
+    if obj.constraints or _has_transform_drivers(obj) or _has_nla_strips(obj):
+        return False
+    return every_pose_frame_is_keyed(obj)
+
+def split_test_count(n, ratio):
+    '''How many of n pooled poses go to the test camera.
+
+    Half-up rounding. When n >= 2 and the ratio is strictly between 0 and 1,
+    both sides keep at least one pose.
+    '''
+    count = int(math.floor(n * float(ratio) + 0.5))
+    if n >= 2 and 0.0 < ratio < 1.0:
+        return min(n - 1, max(1, count))
+    return min(n, max(0, count))
+
+def split_pose_indices(n, ratio, seed):
+    '''Random test indices. Both lists keep the pooled order.'''
+    n_test = split_test_count(n, ratio)
+    chosen = set(random.Random(int(seed)).sample(range(n), n_test)) if n_test else set()
+    train_idx = [i for i in range(n) if i not in chosen]
+    test_idx = [i for i in range(n) if i in chosen]
+    return train_idx, test_idx
+
+def _sample_world_matrices(scene, camera, frames):
+    matrices = []
+    for frame in frames:
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        matrices.append(camera.matrix_world.copy())
+    return matrices
+
+def _apply_world_matrix(obj, world_matrix):
+    if obj.parent is None:
+        obj.matrix_basis = world_matrix.copy()
+        return
+    obj.matrix_basis = obj.matrix_parent_inverse.inverted() @ obj.parent.matrix_world.inverted() @ world_matrix
+
+def write_world_poses(scene, camera, matrices, frame_start):
+    '''Replace pose keys and constraints with one literal world pose per frame.'''
+    while camera.constraints:
+        camera.constraints.remove(camera.constraints[0])
+    if camera.animation_data:
+        camera.animation_data_clear()
+    if not matrices:
+        return
+    rot_path = rotation_data_path(camera)
+    for i, world in enumerate(matrices):
+        frame = frame_start + i
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        _apply_world_matrix(camera, world)
+        camera.keyframe_insert(data_path='location', frame=frame)
+        camera.keyframe_insert(data_path=rot_path, frame=frame)
+        camera.keyframe_insert(data_path='scale', frame=frame)
+    set_keyframe_interpolation(camera, ('location', rot_path, 'scale'), 'LINEAR')
+
+def ensure_per_frame_pose_keys(scene, camera):
+    '''Bake a visual pose onto every integer frame in the camera's own key span.
+
+    A camera with no pose keys contributes nothing. Assign reads the result only
+    after this, when every frame is a keyframe.
+    '''
+    span = pose_span(camera)
+    if span is None or poses_are_literal(camera):
+        return
+    matrices = _sample_world_matrices(scene, camera, range(span[0], span[1] + 1))
+    write_world_poses(scene, camera, matrices, span[0])
+
+def _iter_pose_matrices(scene, camera):
+    span = pose_span(camera)
+    if span is None:
+        return []
+    return _sample_world_matrices(scene, camera, range(span[0], span[1] + 1))
+
+def assign_ttc_split(scene, train_camera, test_camera, ratio, seed):
+    '''Split already-literal per-frame poses. Train frames first, then test frames.'''
+    for camera in (train_camera, test_camera):
+        if pose_span(camera) is not None and not poses_are_literal(camera):
+            raise RuntimeError('TTC split expects a key on every frame of ' + camera.name)
+    pool = _iter_pose_matrices(scene, train_camera)
+    pool += _iter_pose_matrices(scene, test_camera)
+    train_idx, test_idx = split_pose_indices(len(pool), ratio, seed)
+    write_world_poses(scene, train_camera, [pool[i] for i in train_idx], scene.frame_start)
+    write_world_poses(scene, test_camera, [pool[i] for i in test_idx], scene.frame_start)
+    return len(train_idx), len(test_idx)
+
+def redistribute_ttc_frames(scene, train_camera, test_camera, ratio, seed):
+    '''Bake both cameras to per-frame keys, pool those poses, then split by ratio.'''
+    if train_camera == test_camera:
+        raise ValueError('Train and test cameras must be different objects')
+    ensure_per_frame_pose_keys(scene, train_camera)
+    ensure_per_frame_pose_keys(scene, test_camera)
+    counts = assign_ttc_split(scene, train_camera, test_camera, ratio, seed)
+    scene.frame_set(scene.frame_start)
+    return counts
 
 def world_to_local_location(obj, world_location):
     if obj.parent is None:
@@ -317,7 +476,7 @@ def apply_spherical_spiral(scene, camera):
         camera.location = world_to_local_location(camera, world_loc)
         camera.keyframe_insert(data_path='location', frame=frame_start + i)
 
-    set_location_keyframe_interpolation(camera, 'LINEAR')
+    set_keyframe_interpolation(camera, 'location', 'LINEAR')
     scene.frame_set(frame_start)
     return frame_start, frame_end, n
 
