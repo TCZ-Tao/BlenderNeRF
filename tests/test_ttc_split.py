@@ -45,6 +45,15 @@ def assert_same_matrix(test, got, expected):
 
 
 class TTCSplitTests(unittest.TestCase):
+    def test_frame_range_is_inclusive(self):
+        scene = type('S', (), {})()
+        scene.ttc_train_frame_start = 101
+        scene.ttc_nb_frames = 20
+        scene.ttc_test_frame_start = 50
+        scene.ttc_nb_test_frames = 1
+        self.assertEqual(helper.ttc_frame_range(scene, 'TRAIN'), (101, 120))
+        self.assertEqual(helper.ttc_frame_range(scene, 'TEST'), (50, 50))
+
     def test_counts_and_order(self):
         self.assertEqual(helper.split_test_count(100, 0.1), 10)
         self.assertEqual(helper.split_test_count(100, 0.125), 13)

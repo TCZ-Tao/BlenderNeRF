@@ -105,7 +105,9 @@ PROPS = [
 
     # ttc properties
     ('ttc_dataset_name', bpy.props.StringProperty(name='Name', description='Name of the TTC dataset : the data will be stored under <save path>/<name>', default='dataset') ),
+    ('ttc_train_frame_start', bpy.props.IntProperty(name='Train Start', description='First frame of the training camera sequence', default=1) ),
     ('ttc_nb_frames', bpy.props.IntProperty(name='Train Frames', description='Number of training frames from the training camera', default=100, soft_min=1) ),
+    ('ttc_test_frame_start', bpy.props.IntProperty(name='Test Start', description='First frame of the testing camera sequence', default=1) ),
     ('ttc_nb_test_frames', bpy.props.IntProperty(name='Test Frames', description='Number of testing frames captured from the testing camera', default=100, soft_min=1) ),
     ('ttc_test_ratio', bpy.props.FloatProperty(name='Test Ratio', description='Fraction of pooled train and test poses assigned to the test camera. Drawn at random with Seed, then written back in pooled order', default=0.1, min=0.0, max=1.0, subtype='FACTOR', precision=3) ),
     ('camera_train_target', bpy.props.PointerProperty(type=bpy.types.Object, name=TRAIN_CAM, description='Pointer to the training camera', poll=helper.poll_is_camera) ),
@@ -133,6 +135,7 @@ PROPS = [
     ('init_camera_exists', bpy.props.BoolProperty(name='Init camera exists', description='Whether the camera initially exists', default=False) ),
     ('init_active_camera', bpy.props.PointerProperty(type=bpy.types.Object, name='Init active camera', description='Pointer to initial active camera', poll=helper.poll_is_camera) ),
     ('init_active_camera_name', bpy.props.StringProperty(name='Init active camera name', default='') ),
+    ('init_frame_start', bpy.props.IntProperty(name='Initial Frame Start') ),
     ('init_frame_end', bpy.props.IntProperty(name='Initial Frame End') ),
 ]
 

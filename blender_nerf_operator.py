@@ -83,19 +83,20 @@ class BlenderNeRF_Operator(bpy.types.Operator):
 
         initFrame = scene.frame_current
         step = scene.train_frame_steps if (mode == 'TRAIN' and method == 'SOF') else scene.frame_step
+        start = scene.frame_start
         if method == 'COS' and mode == 'TRAIN':
-            end = scene.frame_start + scene.cos_nb_frames - 1
+            end = start + scene.cos_nb_frames - 1
         elif method == 'COS' and mode == 'TEST':
-            end = scene.frame_start + scene.cos_nb_test_frames - 1
+            end = start + scene.cos_nb_test_frames - 1
         elif method == 'TTC' and mode == 'TRAIN':
-            end = scene.frame_start + scene.ttc_nb_frames - 1
+            start, end = helper.ttc_frame_range(scene, 'TRAIN')
         elif method == 'TTC' and mode == 'TEST':
-            end = scene.frame_start + scene.ttc_nb_test_frames - 1
+            start, end = helper.ttc_frame_range(scene, 'TEST')
         else:
             end = scene.frame_end
 
         camera_extr_dict = []
-        for frame in range(scene.frame_start, end + 1, step):
+        for frame in range(start, end + 1, step):
             scene.frame_set(frame)
             filename = os.path.basename( scene.render.frame_path(frame=frame) )
             filedir = OUTPUT_TRAIN * (mode == 'TRAIN') + OUTPUT_TEST * (mode == 'TEST')
@@ -271,7 +272,9 @@ class BlenderNeRF_Operator(bpy.types.Operator):
         elif method == 'TTC':
             logdata['Train Camera Name'] = scene.camera_train_target.name
             logdata['Test Camera Name'] = scene.camera_test_target.name
+            logdata['Train Start'] = scene.ttc_train_frame_start
             logdata['Train Frames'] = scene.ttc_nb_frames
+            logdata['Test Start'] = scene.ttc_test_frame_start
             logdata['Test Frames'] = scene.ttc_nb_test_frames
             logdata['Dataset Name'] = scene.ttc_dataset_name
 
@@ -348,6 +351,7 @@ class BlenderNeRF_Relight(BlenderNeRF_Operator):
 
         scene.init_output_path = scene.render.filepath
         scene.init_frame_step = scene.frame_step
+        scene.init_frame_start = scene.frame_start
         scene.init_frame_end = scene.frame_end
         if scene.camera is not None:
             scene.init_active_camera = scene.camera

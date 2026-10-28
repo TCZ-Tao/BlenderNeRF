@@ -41,6 +41,7 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
 
         # initial properties might have changed since set_init_props update
         scene.init_output_path = scene.render.filepath
+        scene.init_frame_start = scene.frame_start
         scene.init_frame_end = scene.frame_end
 
         if helper.wants_test_json(scene):
@@ -61,7 +62,7 @@ class TrainTestCameras(blender_nerf_operator.BlenderNeRF_Operator):
                 os.makedirs(output_train, exist_ok=True)
                 scene.camera = train_camera
                 scene.rendering = (False, True, False)
-                scene.frame_end = scene.frame_start + scene.ttc_nb_frames - 1 # update end frame
+                helper.apply_ttc_timeline(scene, 'TRAIN')
                 first_channel = gbuffer.selected_output_channels(scene)[0]
                 scene.render.filepath = os.path.join(helper.images_output_dir(scene, 'train', first_channel), '')
 

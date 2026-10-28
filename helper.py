@@ -965,6 +965,23 @@ def invoke_animation_render():
                 return bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
     return bpy.ops.render.render('INVOKE_DEFAULT', animation=True, write_still=True)
 
+def ttc_frame_range(scene, mode):
+    '''Inclusive [start, end] for a TTC train or test sequence.'''
+    if mode == 'TRAIN':
+        start = int(scene.ttc_train_frame_start)
+        count = int(scene.ttc_nb_frames)
+    else:
+        start = int(scene.ttc_test_frame_start)
+        count = int(scene.ttc_nb_test_frames)
+    return start, start + count - 1
+
+def apply_ttc_timeline(scene, mode):
+    scene.frame_start, scene.frame_end = ttc_frame_range(scene, mode)
+
+def restore_ttc_timeline(scene):
+    scene.frame_start = scene.init_frame_start
+    scene.frame_end = scene.init_frame_end
+
 def configure_train_timeline(scene):
     '''Re-apply train camera and frame range. Animation renders must not inherit a drifted timeline.'''
     if scene.rendering[0]:  # SOF
@@ -972,7 +989,7 @@ def configure_train_timeline(scene):
     elif scene.rendering[1]:  # TTC
         if scene.camera_train_target is not None:
             scene.camera = scene.camera_train_target
-        scene.frame_end = scene.frame_start + scene.ttc_nb_frames - 1
+        apply_ttc_timeline(scene, 'TRAIN')
     elif scene.rendering[2]:  # COS
         if CAMERA_NAME in scene.objects:
             scene.camera = scene.objects[CAMERA_NAME]
@@ -983,7 +1000,7 @@ def configure_test_timeline(scene):
         scene.frame_step = scene.init_frame_step
     elif scene.rendering[1]:  # TTC : switch to test camera over the Test Frames range
         scene.camera = scene.camera_test_target
-        scene.frame_end = scene.frame_start + scene.ttc_nb_test_frames - 1
+        apply_ttc_timeline(scene, 'TEST')
     elif scene.rendering[2]:  # COS : selected camera, Test Frames count
         restore_user_camera(scene)
         scene.frame_end = scene.frame_start + scene.cos_nb_test_frames - 1
@@ -1208,7 +1225,9 @@ def finalize_relight(scene):
     if scene.rendering[0]:
         scene.frame_step = scene.init_frame_step
 
-    if scene.rendering[1] or scene.rendering[2]:
+    if scene.rendering[1]:
+        restore_ttc_timeline(scene)
+    elif scene.rendering[2]:
         scene.frame_end = scene.init_frame_end
 
     restore_user_camera(scene)
@@ -1239,7 +1258,7 @@ def finalize_render(scene):
         scene.frame_step = scene.init_frame_step
 
     if scene.rendering[1]:
-        scene.frame_end = scene.init_frame_end
+        restore_ttc_timeline(scene)
 
     if scene.rendering[2]:
         restore_user_camera(scene)
